@@ -201,7 +201,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =============================================================================
-# HELPER: RENDER SOURCE CARD WITH DIRECT CLICKABLE LINKS
+# HELPER: RENDER SOURCE CARD WITH UNIQUE KEYS
 # =============================================================================
 
 def render_source_card(i: int, src: dict, key_prefix: str = "src"):
@@ -238,14 +238,14 @@ def render_source_card(i: int, src: dict, key_prefix: str = "src"):
             unsafe_allow_html=True
         )
         if url and str(url).startswith("http"):
-            st.link_button("🔗 Mở Nguồn Web Trực Tiếp", url=url, use_container_width=True)
+            st.link_button("🔗 Mở Nguồn Web Trực Tiếp", url=url, use_container_width=True, key=f"btn_{key_prefix}_{i}_{id(src)}")
 
     st.text_area(
         f"Chunk Content #{i}",
         value=content_str,
         height=110,
         disabled=True,
-        key=f"{key_prefix}_txt_{i}_{hash(content_str)}"
+        key=f"txt_{key_prefix}_{i}_{id(src)}"
     )
     st.divider()
 
@@ -333,13 +333,13 @@ with tab1:
     st.caption("💬 Trò chuyện trực tiếp với RAG Chatbot có trích dẫn nguồn văn bản chính xác kèm Link trực tiếp")
 
     # Render Chat History
-    for msg in st.session_state.messages:
+    for msg_idx, msg in enumerate(st.session_state.messages):
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
             if msg["role"] == "assistant" and "sources" in msg and msg["sources"]:
                 with st.expander(f"📚 Nguồn tài liệu tham khảo ({len(msg['sources'])} chunks) — Via `{msg.get('retrieval_source', 'hybrid')}`"):
                     for i, src in enumerate(msg["sources"], 1):
-                        render_source_card(i, src, key_prefix=f"hist_{hash(msg['content'][:30])}")
+                        render_source_card(i, src, key_prefix=f"hist_msg_{msg_idx}")
 
     # Query Input Handling
     user_input = st.chat_input("Nhập câu hỏi về đổi trả, thanh toán, giao hàng hoặc quy định người bán...")
@@ -376,7 +376,7 @@ with tab1:
                 if sources:
                     with st.expander(f"📚 Nguồn tài liệu tham khảo ({len(sources)} chunks) — Via `{ret_source}`"):
                         for i, src in enumerate(sources, 1):
-                            render_source_card(i, src, key_prefix="curr")
+                            render_source_card(i, src, key_prefix=f"live_{len(st.session_state.messages)}")
 
         st.session_state.messages.append({
             "role": "assistant",
@@ -455,7 +455,7 @@ with tab3:
             web_url = URL_MAP.get(file_name)
             if web_url:
                 st.markdown(f"🔗 **Link nguồn chính thức trên Web:** [{web_url}]({web_url})")
-                st.link_button("🌐 Mở Bài Viết Gốc Trên Web", url=web_url)
+                st.link_button("🌐 Mở Bài Viết Gốc Trên Web", url=web_url, key=f"tab3_link_{hash(file_name)}")
 
             col_left, col_right = st.columns(2)
             with col_left:
@@ -480,4 +480,4 @@ with tab4:
             results = retrieve(test_q, top_k=top_k, score_threshold=score_threshold)
             st.success(f"Lấy về {len(results)} kết quả (Source: `{results[0].get('source','unknown') if results else 'None'}`)")
             for i, r in enumerate(results, 1):
-                render_source_card(i, r, key_prefix="fallback")
+                render_source_card(i, r, key_prefix="fallback_test")

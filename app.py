@@ -1,7 +1,7 @@
 """
 E-commerce Support RAG Chatbot & Evaluation Dashboard.
 Streamlit application implementing full 7-layer RAG Architecture (Task 1-10 + Evaluation & UI).
-Theme: Bright Cool Light Mode (Màu lạnh sáng đẹp)
+Theme: Bright Cool Light Mode (Màu lạnh sáng đẹp) với Direct Source Web Links
 """
 
 import os
@@ -17,6 +17,31 @@ load_dotenv()
 # Set path to import from src/
 PROJECT_ROOT = Path(__file__).parent
 sys.path.insert(0, str(PROJECT_ROOT))
+
+# =============================================================================
+# URL MAPPING FOR DIRECT SOURCE ACCESS
+# =============================================================================
+
+URL_MAP = {
+    "shopeereturn.md": "https://help.shopee.vn/portal/4/article/77251",
+    "shopeesell.md": "https://help.shopee.vn/portal/4/article/79200",
+    "shopeespaylater.md": "https://help.shopee.vn/portal/4/article/79205",
+    "article_01.md": "https://help.shopee.vn/portal/4/article/79198-Phuong-thuc-thanh-toan",
+    "article_02.md": "https://help.shopee.vn/portal/4/article/77251-Quy-dinh-tra-hang-hoan-tien",
+    "article_03.md": "https://help.shopee.vn/portal/4/article/77244-Huong-dan-giao-hang-tiet-kiem",
+    "article_04.md": "https://help.shopee.vn/portal/4/article/79200-Quy-dinh-dang-ban-san-pham-nguoi-ban",
+    "article_05.md": "https://help.shopee.vn/portal/4/article/79205-Huong-dan-su-dung-ShopeePay-Coin",
+    "tra_hang_hoan_tien.md": "https://help.shopee.vn/portal/4/article/77251",
+    "dieu_khoan_splater.md": "https://help.shopee.vn/portal/4/article/79205",
+    "dang_ban_san_pham.md": "https://help.shopee.vn/portal/4/article/79200",
+    "chinh_sach_van_chuyen.md": "https://help.shopee.vn/portal/4/article/77244",
+    "quy_che_hoat_dong_chung.md": "https://help.shopee.vn/portal/4/article/79198",
+    "chinh_sach_chong_gian_lan.md": "https://help.shopee.vn/portal/4/article/77251",
+    "chinh_sach_ma_uu_dai.md": "https://help.shopee.vn/portal/4/article/79198",
+    "dieu_khoan_shopee_ai.md": "https://help.shopee.vn/portal/4/article/79198",
+    "quyen_so_huu_tri_tue.md": "https://help.shopee.vn/portal/4/article/79200",
+    "tranh_chap_khieu_nai.md": "https://help.shopee.vn/portal/4/article/77251",
+}
 
 # =============================================================================
 # PAGE CONFIG & BRIGHT COOL CUSTOM CSS AESTHETICS
@@ -130,14 +155,6 @@ st.markdown("""
         font-size: 0.78rem;
         font-weight: 700;
     }
-    .badge-legal {
-        background-color: #4338ca;
-        color: #ffffff;
-        padding: 4px 10px;
-        border-radius: 8px;
-        font-size: 0.78rem;
-        font-weight: 700;
-    }
 
     /* Sidebar - Soft Ice Blue Styling */
     section[data-testid="stSidebar"] {
@@ -182,6 +199,55 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
+# =============================================================================
+# HELPER: RENDER SOURCE CARD WITH DIRECT CLICKABLE LINKS
+# =============================================================================
+
+def render_source_card(i: int, src: dict, key_prefix: str = "src"):
+    meta = src.get("metadata", {})
+    source_name = meta.get("source", "Chính sách")
+    doc_type = meta.get("type", "policy")
+    score = src.get("score", 0.0)
+    ret_src = src.get("source", "hybrid")
+    content_str = src.get("content", "")
+
+    # Resolve URL
+    url = meta.get("url") or URL_MAP.get(source_name)
+    if not url or not str(url).startswith("http"):
+        for line in content_str.splitlines()[:10]:
+            if "**Source:**" in line:
+                extracted = line.split("**Source:**")[1].strip()
+                if extracted.startswith("http"):
+                    url = extracted
+                    break
+
+    col_a, col_b = st.columns([2.5, 1.5])
+    with col_a:
+        if url and str(url).startswith("http"):
+            st.markdown(f"**[{i}] 🔗 [{source_name}]({url})** | Type: `{doc_type}`")
+            st.caption(f"🌐 Nguồn web chính thức: [{url}]({url})")
+        else:
+            st.markdown(f"**[{i}] 📄 {source_name}** | Type: `{doc_type}`")
+            st.caption(f"📁 Tệp tin tài liệu: `data/standardized/{doc_type}/{source_name}`")
+
+    with col_b:
+        st.markdown(
+            f"<span class='badge-score'>score: {score:.4f}</span> "
+            f"<span class='badge-hybrid'>{ret_src}</span>",
+            unsafe_allow_html=True
+        )
+        if url and str(url).startswith("http"):
+            st.link_button("🔗 Mở Nguồn Web Trực Tiếp", url=url, use_container_width=True)
+
+    st.text_area(
+        f"Chunk Content #{i}",
+        value=content_str,
+        height=110,
+        disabled=True,
+        key=f"{key_prefix}_txt_{i}_{hash(content_str)}"
+    )
+    st.divider()
 
 # =============================================================================
 # SESSION STATE INITIALIZATION
@@ -264,7 +330,7 @@ tab1, tab2, tab3, tab4 = st.tabs([
 # =============================================================================
 
 with tab1:
-    st.caption("💬 Trò chuyện trực tiếp với RAG Chatbot có trích dẫn nguồn văn bản chính xác")
+    st.caption("💬 Trò chuyện trực tiếp với RAG Chatbot có trích dẫn nguồn văn bản chính xác kèm Link trực tiếp")
 
     # Render Chat History
     for msg in st.session_state.messages:
@@ -273,20 +339,7 @@ with tab1:
             if msg["role"] == "assistant" and "sources" in msg and msg["sources"]:
                 with st.expander(f"📚 Nguồn tài liệu tham khảo ({len(msg['sources'])} chunks) — Via `{msg.get('retrieval_source', 'hybrid')}`"):
                     for i, src in enumerate(msg["sources"], 1):
-                        meta = src.get("metadata", {})
-                        source_name = meta.get("source", "Chính sách")
-                        doc_type = meta.get("type", "policy")
-                        score = src.get("score", 0.0)
-                        ret_src = src.get("source", "hybrid")
-
-                        col_a, col_b = st.columns([3, 1])
-                        with col_a:
-                            st.markdown(f"**[{i}] {source_name}** | Type: `{doc_type}`")
-                        with col_b:
-                            st.markdown(f"<span class='badge-score'>score: {score:.4f}</span> <span class='badge-hybrid'>{ret_src}</span>", unsafe_allow_html=True)
-
-                        st.text_area(f"Chunk Content #{i}", value=src.get("content", ""), height=100, disabled=True, key=f"hist_txt_{i}_{hash(src.get('content',''))}")
-                        st.divider()
+                        render_source_card(i, src, key_prefix=f"hist_{hash(msg['content'][:30])}")
 
     # Query Input Handling
     user_input = st.chat_input("Nhập câu hỏi về đổi trả, thanh toán, giao hàng hoặc quy định người bán...")
@@ -323,20 +376,7 @@ with tab1:
                 if sources:
                     with st.expander(f"📚 Nguồn tài liệu tham khảo ({len(sources)} chunks) — Via `{ret_source}`"):
                         for i, src in enumerate(sources, 1):
-                            meta = src.get("metadata", {})
-                            source_name = meta.get("source", "Chính sách")
-                            doc_type = meta.get("type", "policy")
-                            score = src.get("score", 0.0)
-                            ret_src = src.get("source", "hybrid")
-
-                            col_a, col_b = st.columns([3, 1])
-                            with col_a:
-                                st.markdown(f"**[{i}] {source_name}** | Type: `{doc_type}`")
-                            with col_b:
-                                st.markdown(f"<span class='badge-score'>score: {score:.4f}</span> <span class='badge-hybrid'>{ret_src}</span>", unsafe_allow_html=True)
-
-                            st.text_area(f"Chunk Content #{i}", value=src.get("content", ""), height=100, disabled=True, key=f"curr_txt_{i}_{hash(src.get('content',''))}")
-                            st.divider()
+                            render_source_card(i, src, key_prefix="curr")
 
         st.session_state.messages.append({
             "role": "assistant",
@@ -411,6 +451,12 @@ with tab3:
         selected_file = st.selectbox("Chọn văn bản để xem nội dung:", options=md_files, format_func=lambda x: str(x.relative_to(std_dir)))
         if selected_file:
             content = selected_file.read_text(encoding="utf-8")
+            file_name = selected_file.name
+            web_url = URL_MAP.get(file_name)
+            if web_url:
+                st.markdown(f"🔗 **Link nguồn chính thức trên Web:** [{web_url}]({web_url})")
+                st.link_button("🌐 Mở Bài Viết Gốc Trên Web", url=web_url)
+
             col_left, col_right = st.columns(2)
             with col_left:
                 st.markdown("##### 📝 Content Markdown Rendered")
@@ -434,6 +480,4 @@ with tab4:
             results = retrieve(test_q, top_k=top_k, score_threshold=score_threshold)
             st.success(f"Lấy về {len(results)} kết quả (Source: `{results[0].get('source','unknown') if results else 'None'}`)")
             for i, r in enumerate(results, 1):
-                st.markdown(f"**[{i}] [{r.get('source','unknown')}] Score: `{r.get('score',0):.4f}`**")
-                st.markdown(r.get("content", ""))
-                st.divider()
+                render_source_card(i, r, key_prefix="fallback")

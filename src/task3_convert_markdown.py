@@ -5,6 +5,7 @@ Task 3 — Convert toàn bộ file trong data/landing/ thành Markdown.
 import json
 from pathlib import Path
 
+# pyrefly: ignore [missing-import]
 from markitdown import MarkItDown
 
 LANDING_DIR = Path(__file__).parent.parent / "data" / "landing"

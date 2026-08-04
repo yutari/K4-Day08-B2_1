@@ -1,6 +1,7 @@
 """
 E-commerce Support RAG Chatbot & Evaluation Dashboard.
 Streamlit application implementing full 7-layer RAG Architecture (Task 1-10 + Evaluation & UI).
+Theme: Bright Cool Light Mode (Màu lạnh sáng đẹp)
 """
 
 import os
@@ -18,7 +19,7 @@ PROJECT_ROOT = Path(__file__).parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 # =============================================================================
-# PAGE CONFIG & CUSTOM CSS AESTHETICS
+# PAGE CONFIG & BRIGHT COOL CUSTOM CSS AESTHETICS
 # =============================================================================
 
 st.set_page_config(
@@ -31,107 +32,153 @@ st.set_page_config(
 st.markdown("""
 <style>
     /* Google Fonts */
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
     
     html, body, [class*="css"] {
         font-family: 'Inter', sans-serif;
     }
 
+    /* Bright Cool Background */
+    .stApp {
+        background-color: #f8fafc;
+        color: #0f172a;
+    }
+
     /* Main Container Padding */
     .main .block-container {
         padding-top: 1.5rem;
-        padding-bottom: 2rem;
+        padding-bottom: 2.5rem;
     }
 
-    /* Hero Banner Styling */
+    /* Hero Banner - Bright Cool Glacier Gradient */
     .hero-banner {
-        background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311b92 100%);
-        border-radius: 16px;
-        padding: 24px 32px;
+        background: linear-gradient(135deg, #0284c7 0%, #0369a1 40%, #1e40af 100%);
+        border-radius: 18px;
+        padding: 28px 36px;
         color: white;
         margin-bottom: 24px;
-        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
-        border: 1px solid rgba(255, 255, 255, 0.1);
+        box-shadow: 0 12px 28px -6px rgba(2, 132, 199, 0.25);
+        border: 1px solid rgba(255, 255, 255, 0.3);
     }
     .hero-title {
-        font-size: 2.2rem;
-        font-weight: 700;
+        font-size: 2.3rem;
+        font-weight: 800;
         margin: 0;
-        background: linear-gradient(90deg, #38bdf8 0%, #818cf8 50%, #c084fc 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #ffffff;
+        text-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
     .hero-subtitle {
-        font-size: 1.05rem;
-        color: #94a3b8;
+        font-size: 1.08rem;
+        color: #e0f2fe;
         margin-top: 8px;
         margin-bottom: 0;
+        font-weight: 400;
     }
 
-    /* Metric Cards */
+    /* Metric Cards - Icy White Glassmorphism */
     .metric-card {
-        background: rgba(30, 41, 59, 0.7);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 12px;
-        padding: 18px;
+        background: #ffffff;
+        border: 1px solid #cbd5e1;
+        border-radius: 14px;
+        padding: 20px;
         text-align: center;
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        box-shadow: 0 4px 15px rgba(14, 165, 233, 0.06);
+        transition: all 0.25s ease-in-out;
     }
     .metric-card:hover {
         transform: translateY(-4px);
-        box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+        box-shadow: 0 12px 24px -4px rgba(2, 132, 199, 0.18);
+        border-color: #38bdf8;
     }
     .metric-val {
-        font-size: 1.8rem;
-        font-weight: 700;
-        color: #38bdf8;
+        font-size: 2rem;
+        font-weight: 800;
+        color: #0284c7;
+        letter-spacing: -0.5px;
     }
     .metric-lbl {
         font-size: 0.85rem;
-        color: #94a3b8;
+        color: #475569;
+        font-weight: 600;
         text-transform: uppercase;
-        letter-spacing: 0.5px;
+        letter-spacing: 0.6px;
+        margin-top: 4px;
     }
 
-    /* Source Badges */
+    /* Source Badges - Crisp Cool Tones */
     .badge-hybrid {
         background-color: #0284c7;
-        color: white;
-        padding: 3px 8px;
-        border-radius: 6px;
-        font-size: 0.75rem;
-        font-weight: 600;
+        color: #ffffff;
+        padding: 4px 10px;
+        border-radius: 8px;
+        font-size: 0.78rem;
+        font-weight: 700;
     }
     .badge-pageindex {
         background-color: #d97706;
-        color: white;
-        padding: 3px 8px;
-        border-radius: 6px;
-        font-size: 0.75rem;
-        font-weight: 600;
+        color: #ffffff;
+        padding: 4px 10px;
+        border-radius: 8px;
+        font-size: 0.78rem;
+        font-weight: 700;
     }
     .badge-score {
         background-color: #059669;
-        color: white;
-        padding: 3px 8px;
-        border-radius: 6px;
-        font-size: 0.75rem;
-        font-weight: 600;
+        color: #ffffff;
+        padding: 4px 10px;
+        border-radius: 8px;
+        font-size: 0.78rem;
+        font-weight: 700;
     }
     .badge-legal {
-        background-color: #7c3aed;
-        color: white;
-        padding: 3px 8px;
-        border-radius: 6px;
-        font-size: 0.75rem;
-        font-weight: 600;
+        background-color: #4338ca;
+        color: #ffffff;
+        padding: 4px 10px;
+        border-radius: 8px;
+        font-size: 0.78rem;
+        font-weight: 700;
     }
 
-    /* Sidebar Styling */
+    /* Sidebar - Soft Ice Blue Styling */
     section[data-testid="stSidebar"] {
-        background-color: #0f172a;
-        border-right: 1px solid rgba(255, 255, 255, 0.08);
+        background: linear-gradient(180deg, #f0f9ff 0%, #e0f2fe 100%);
+        border-right: 1px solid #bae6fd;
+    }
+    section[data-testid="stSidebar"] h1, 
+    section[data-testid="stSidebar"] h2, 
+    section[data-testid="stSidebar"] h3, 
+    section[data-testid="stSidebar"] h4,
+    section[data-testid="stSidebar"] label,
+    section[data-testid="stSidebar"] span {
+        color: #0f172a !important;
+    }
+
+    /* Chat Messages Styling */
+    .stChatMessage[data-testid="stChatMessage"] {
+        background-color: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        padding: 14px;
+        margin-bottom: 12px;
+    }
+
+    /* Expander Styling */
+    div[data-testid="stExpander"] {
+        background-color: #ffffff;
+        border: 1px solid #cbd5e1;
+        border-radius: 10px;
+    }
+
+    /* Tabs Header Styling */
+    button[data-baseweb="tab"] {
+        font-weight: 600 !important;
+        font-size: 1rem !important;
+        color: #475569 !important;
+    }
+    button[aria-selected="true"] {
+        color: #0284c7 !important;
+        border-bottom-color: #0284c7 !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -178,6 +225,17 @@ with st.sidebar:
     if st.button("🗑️ Xóa Lịch Sử Hội Thoại", use_container_width=True, type="secondary"):
         st.session_state.messages = []
         st.rerun()
+
+    st.divider()
+    st.markdown("##### 📌 Connection Status (.env)")
+    has_openai = bool(os.getenv("OPENAI_API_KEY"))
+    has_openrouter = bool(os.getenv("OPENROUTER_API_KEY"))
+    has_gemini = bool(os.getenv("GEMINI_API_KEY"))
+
+    if has_openai or has_openrouter or has_gemini:
+        st.success("🟢 .env Connected (LLM Ready)")
+    else:
+        st.info("🔵 Local Template Fallback Ready")
 
     st.divider()
     st.markdown("##### 📌 System Architecture")
@@ -348,7 +406,7 @@ with tab3:
     std_dir = PROJECT_ROOT / "data" / "standardized"
     if std_dir.exists():
         md_files = list(std_dir.rglob("*.md"))
-        st.info(f"Tổng số văn bản trong kho dữ liệu: **{len(md_files)} tệp tin Markdown**")
+        st.info(f"Tổng số văn bản trong kho dữ liệu: **{len(md_files)} tệp tin Markdown** (Chứa 375 Chunks)")
 
         selected_file = st.selectbox("Chọn văn bản để xem nội dung:", options=md_files, format_func=lambda x: str(x.relative_to(std_dir)))
         if selected_file:

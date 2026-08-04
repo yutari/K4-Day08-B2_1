@@ -89,9 +89,9 @@ def generate_with_citation(query: str, top_k: int = TOP_K) -> dict:
 
 if __name__ == "__main__":
     test_queries = [
-        "Shopee hỗ trợ những phương thức thanh toán nào?",
-        "Làm sao để yêu cầu đổi trả hay hoàn tiền?",
-        "Cần chuẩn bị bằng chứng gì khi yêu cầu hoàn tiền?",
+        "Shopee ho tro nhung phuong thuc thanh toan nao?",
+        "Lam sao de yeu cau doi tra hay hoan tien?",
+        "Can chuan bi bang chung gi khi yeu cau hoan tien?",
     ]
 
     for q in test_queries:
@@ -99,6 +99,8 @@ if __name__ == "__main__":
         print(f"Q: {q}")
         print("=" * 70)
         result = generate_with_citation(q)
-        print(f"\nA: {result['answer']}")
+        ans = result['answer'].encode('ascii', errors='ignore').decode('ascii')
+        print(f"\nA: {ans[:200]}...")
         print(f"\n[Sources: {len(result['sources'])} chunks | via {result['retrieval_source']}]")
+
 

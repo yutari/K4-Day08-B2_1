@@ -11,7 +11,7 @@ from collections.abc import Sequence
 
 
 FOLLOW_UP_MARKERS = (
-    "nó", "cái đó", "việc đó", "trường hợp đó", "còn", "vậy", "thế",
+    "nó", "cái đó", "việc đó", "trường hợp đó", "còn", "vậy",
     "bao lâu", "mất phí", "điều kiện", "bằng chứng", "họ", "này",
 )
 
@@ -33,10 +33,7 @@ def needs_rewrite(query: str) -> bool:
         pass
 
     normalized = re.sub(r"\s+", " ", query.lower()).strip()
-    words = normalized.split()
-    return any(marker in normalized for marker in FOLLOW_UP_MARKERS) or (
-        len(words) <= 9 and not any(w in normalized for w in ("chán", "buồn", "nản", "mệt", "haiz", "chào", "hi", "hello"))
-    )
+    return any(marker in normalized for marker in FOLLOW_UP_MARKERS)
 
 
 def rewrite_query(query: str, messages: Sequence[dict] | None = None) -> str:

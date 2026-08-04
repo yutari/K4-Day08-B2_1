@@ -90,6 +90,14 @@ _SMALL_TALK_QUERIES = frozenset(
         "bạn làm được gì",
         "bot là ai",
         "who are you",
+        "hôm nay bạn thế nào",
+        "bạn thế nào",
+        "bạn thế nào rồi",
+        "bạn khỏe không",
+        "bạn có khỏe không",
+        "bạn ra sao",
+        "thế nào rồi",
+        "hôm nay thế nào",
     }
 )
 SYSTEM_PROMPT = """Bạn là trợ lý về chính sách thương mại điện tử.
@@ -262,11 +270,24 @@ def _generate_from_providers(user_message: str) -> str:
 
 
 _DOMAIN_ROLES = {"người mua", "người bán", "shopee", "bên vận chuyển", "đơn vị vận chuyển", "chính sách"}
+_OUT_OF_SCOPE_PATTERNS = (
+    r"\b(mưa|nắng|thời tiết|dự báo|nhiệt độ)\b",
+    r"\b(chắc hôm nay|hôm nay thế nào|ăn gì|đi đâu)\b",
+    r"\b(bóng đá|cầu thủ|diễn viên|ca sĩ|tổ chức|tổng thống|giá vàng|giá xăng)\b",
+)
+_DOMAIN_KEYWORDS = (
+    "trả hàng", "hoàn tiền", "giao hàng", "vận chuyển", "thanh toán", "người mua", "người bán",
+    "shopee", "sàn", "đơn hàng", "tài khoản", "khiếu nại", "bằng chứng", "phí", "sản phẩm",
+    "chính sách", "quy định", "hướng dẫn", "mã giảm giá", "xu", "ví", "shopeepay", "cod",
+    "hủy đơn", "đổi trả", "bao lâu", "thời hạn", "điều kiện", "sao quả tạ", "vận đơn", "hàng"
+)
 
 
 def is_out_of_scope(query: str) -> bool:
     """Return whether a query is clearly outside the e-commerce policy domain."""
     norm = query.lower().strip()
+    if any(re.search(pat, norm) for pat in _OUT_OF_SCOPE_PATTERNS):
+        return True
     if re.search(r"\b(là ai|ai là|ai thế)\b", norm):
         if not any(role in norm for role in _DOMAIN_ROLES):
             return True
@@ -286,6 +307,7 @@ def is_small_talk(query: str) -> bool:
         r"^(chán|nản|buồn|mệt|haiz|haha|hihi)(\s+.*)?$",
         r"^.*(chán quá|nói chuyện chán|chat chán).*$",
         r"^(bạn|bot) (là ai|tên gì|làm được gì|có thể làm gì)",
+        r"^.*(bạn thế nào|bạn khỏe không|hôm nay bạn|bạn ra sao|thế nào rồi|sao rồi).*$",
     )
     return any(re.search(pat, normalised) for pat in casual_patterns)
 
@@ -377,6 +399,18 @@ def generate_with_citation(
         use_reranking=use_reranking,
         dense_weight=dense_weight,
     )
+    
+    # Reject irrelevant queries that lack domain keywords and have low confidence
+    has_domain_keyword = any(kw in query.lower() for kw in _DOMAIN_KEYWORDS)
+    confidence = chunks[0].get("metadata", {}).get("confidence", 0.0) if chunks else 0.0
+    if not has_domain_keyword and confidence < score_threshold:
+        return {
+            "answer": UNVERIFIABLE_ANSWER,
+            "sources": [],
+            "retrieval_source": "none",
+            "citation_validation": "no_evidence",
+        }
+
     ordered_chunks = reorder_for_llm(chunks)
     context = format_context(ordered_chunks)
     recent_history = list(history or [])[-6:]

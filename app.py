@@ -34,16 +34,16 @@ URL_MAP = {
     "article_03.md": "https://help.shopee.vn/portal/4/article/77244-Huong-dan-giao-hang-tiet-kiem",
     "article_04.md": "https://help.shopee.vn/portal/4/article/79200-Quy-dinh-dang-ban-san-pham-nguoi-ban",
     "article_05.md": "https://help.shopee.vn/portal/4/article/79205-Huong-dan-su-dung-ShopeePay-Coin",
-    "tra_hang_hoan_tien.md": "https://help.shopee.vn/portal/4/article/77251",
-    "dieu_khoan_splater.md": "https://help.shopee.vn/portal/4/article/79205",
-    "dang_ban_san_pham.md": "https://help.shopee.vn/portal/4/article/79200",
-    "chinh_sach_van_chuyen.md": "https://help.shopee.vn/portal/4/article/77244",
-    "quy_che_hoat_dong_chung.md": "https://help.shopee.vn/portal/4/article/79198",
-    "chinh_sach_chong_gian_lan.md": "https://help.shopee.vn/portal/4/article/77251",
-    "chinh_sach_ma_uu_dai.md": "https://help.shopee.vn/portal/4/article/79198",
-    "dieu_khoan_shopee_ai.md": "https://help.shopee.vn/portal/4/article/79198",
-    "quyen_so_huu_tri_tue.md": "https://help.shopee.vn/portal/4/article/79200",
-    "tranh_chap_khieu_nai.md": "https://help.shopee.vn/portal/4/article/77251",
+    "tra_hang_hoan_tien.md": "https://help.shopee.vn/portal/article/77251",
+    "dieu_khoan_splater.md": "https://help.shopee.vn/portal/article/118121",
+    "dang_ban_san_pham.md": "https://help.shopee.vn/portal/article/77246",
+    "chinh_sach_van_chuyen.md": "https://help.shopee.vn/portal/article/77250",
+    "quy_che_hoat_dong_chung.md": "https://help.shopee.vn/portal/article/77245",
+    "chinh_sach_chong_gian_lan.md": "https://help.shopee.vn/portal/article/140097",
+    "chinh_sach_ma_uu_dai.md": "https://help.shopee.vn/portal/4/article/166085",
+    "dieu_khoan_shopee_ai.md": "https://help.shopee.vn/portal/4/article/185399",
+    "quyen_so_huu_tri_tue.md": "https://help.shopee.vn/portal/article/107992",
+    "tranh_chap_khieu_nai.md": "https://help.shopee.vn/portal/article/77265",
 }
 
 # =============================================================================
@@ -224,14 +224,6 @@ def resolve_source_url(metadata: dict, chunk_content: str) -> str | None:
     if direct_url.startswith(("https://", "http://")):
         return direct_url
 
-    normalized_map = {_normalise_source_key(key): url for key, url in URL_MAP.items()}
-    for value in (metadata.get("source"), metadata.get("relative_path"), metadata.get("title")):
-        raw_value = str(value or "")
-        for key in (raw_value, Path(raw_value).name, _normalise_source_key(raw_value)):
-            url = URL_MAP.get(key) or normalized_map.get(_normalise_source_key(key))
-            if url:
-                return url
-
     source_texts = [chunk_content]
     relative_path = str(metadata.get("relative_path") or metadata.get("source") or "")
     if relative_path:
@@ -241,13 +233,39 @@ def resolve_source_url(metadata: dict, chunk_content: str) -> str | None:
                 source_texts.append(document_path.read_text(encoding="utf-8"))
             except OSError:
                 pass
+        elif Path(relative_path).name:
+            # Old Chroma records stored only a filename, without `news/` or
+            # `legal/`; locate that original Markdown document safely.
+            for candidate in STANDARDIZED_DIR.rglob(Path(relative_path).name):
+                if candidate.is_file():
+                    try:
+                        source_texts.append(candidate.read_text(encoding="utf-8"))
+                    except OSError:
+                        pass
+                    break
 
     for text in source_texts:
         match = re.search(r"^\*\*Source:\*\*\s*(https?://\S+)", text, flags=re.MULTILINE)
         if not match:
-            match = re.search(r"^url:\s*(https?://\S+)", text, flags=re.MULTILINE | re.IGNORECASE)
+            match = re.search(r"^(?:source_url|url):\s*(https?://\S+)", text, flags=re.MULTILINE | re.IGNORECASE)
         if match:
             return match.group(1).rstrip(".,)")
+
+    # Legacy files without an embedded URL fall back to the curated filename
+    # mapping. This also supports chunks stored by older Chroma indexes.
+    normalized_map = {_normalise_source_key(key): url for key, url in URL_MAP.items()}
+    for value in (metadata.get("source"), metadata.get("relative_path"), metadata.get("title")):
+        raw_value = str(value or "")
+        for key in (raw_value, Path(raw_value).name, _normalise_source_key(raw_value)):
+            normalised_key = _normalise_source_key(key)
+            url = URL_MAP.get(key) or normalized_map.get(normalised_key)
+            if url:
+                return url
+            # Some older indexed chunks retain a long generated title rather
+            # than their filename, e.g. "CHÍNH SÁCH ... TRA HANG HOAN TIEN".
+            for mapped_key, mapped_url in normalized_map.items():
+                if len(mapped_key) >= 6 and mapped_key in normalised_key:
+                    return mapped_url
     return None
 
 
@@ -310,7 +328,7 @@ def render_source_card(i: int, src: dict, key_prefix: str = "src"):
             st.caption(f"🌐 Nguồn web chính thức: [{url}]({url})")
         else:
             st.markdown(f"**[{i}] 📄 {source_name}** | Type: `{doc_type}`")
-            st.caption(f"📁 Tệp tin tài liệu: `data/standardized/{doc_type}/{source_name}`")
+            st.caption(f"📁 Tệp tin tài liệu: `data/standardized/{source_file}`")
 
     with col_b:
         st.markdown(
@@ -454,8 +472,11 @@ with tab1:
     if query:
         st.session_state.pending_query = None
         from src.task09_query_expansion import rewrite_query
+        from src.task10_generation import is_small_talk
 
-        rewritten_query = rewrite_query(query, st.session_state.messages)
+        # Do not turn a greeting into a context-dependent policy query.
+        small_talk_query = is_small_talk(query)
+        rewritten_query = query if small_talk_query else rewrite_query(query, st.session_state.messages)
 
         # Display User Message
         append_message({"role": "user", "content": query})
@@ -464,11 +485,19 @@ with tab1:
 
         # Generate Assistant Response
         with st.chat_message("assistant"):
-            with st.spinner("🔍 Đang tìm kiếm tài liệu Hybrid Search (BM25 + Dense) và tổng hợp câu trả lời..."):
+            spinner_message = (
+                "💬 Đang phản hồi..."
+                if small_talk_query
+                else "🔍 Đang tìm kiếm tài liệu Hybrid Search (BM25 + Dense) và tổng hợp câu trả lời..."
+            )
+            with st.spinner(spinner_message):
                 try:
                     from src.task10_generation import generate_with_citation
 
-                    warm_retrieval_resources()
+                    # A simple greeting is answered directly and must not load
+                    # the retrieval stack or surface unrelated policy chunks.
+                    if not small_talk_query:
+                        warm_retrieval_resources()
                     # The displayed question is preserved; the expanded query is only retrieval context.
                     res = generate_with_citation(
                         rewritten_query,

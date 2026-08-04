@@ -236,6 +236,13 @@ def get_ragas_runtime() -> tuple[RagasRuntime | None, str]:
         return None, "RAGAS evaluator model hoặc embedding model đang để trống."
 
     try:
+        import sys
+        import types
+        if "langchain_community.chat_models.vertexai" not in sys.modules:
+            m = types.ModuleType("langchain_community.chat_models.vertexai")
+            m.ChatVertexAI = None
+            sys.modules["langchain_community.chat_models.vertexai"] = m
+
         import ragas
         from datasets import Dataset
         from ragas import evaluate

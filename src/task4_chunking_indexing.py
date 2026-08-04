@@ -16,19 +16,40 @@ EMBEDDING_DIM = 384
 COLLECTION_NAME = "ecommerce_support_docs"
 
 
+def _parse_metadata_lines(block: str) -> dict[str, str]:
+    metadata: dict[str, str] = {}
+    for line in block.splitlines():
+        if ":" in line:
+            key, value = line.split(":", 1)
+            metadata[key.strip()] = value.strip()
+    return metadata
+
+
 def _parse_front_matter(content: str) -> tuple[dict[str, str], str]:
-    """Read YAML-like front matter without adding a YAML dependency."""
+    """Read a conventional front-matter block at the beginning of a document."""
     if not content.startswith("---\n"):
         return {}, content
     end = content.find("\n---", 4)
     if end < 0:
         return {}, content
-    metadata: dict[str, str] = {}
-    for line in content[4:end].splitlines():
-        if ":" in line:
-            key, value = line.split(":", 1)
-            metadata[key.strip()] = value.strip()
-    return metadata, content[end + 4 :].lstrip()
+    metadata = _parse_metadata_lines(content[4:end])
+    return (metadata, content[end + 4 :].lstrip()) if metadata else ({}, content)
+
+
+def _extract_embedded_metadata(content: str) -> tuple[dict[str, str], str]:
+    """Remove YAML-like metadata blocks placed after an initial Markdown heading.
+
+    Some legacy documents use a horizontal rule followed by a second `---`
+    delimiter before their metadata.  That block must be treated as metadata,
+    not as retrievable answer text.
+    """
+    delimiters = list(re.finditer(r"^---\s*$", content, flags=re.MULTILINE))
+    for start, end in zip(delimiters, delimiters[1:]):
+        metadata = _parse_metadata_lines(content[start.end() : end.start()])
+        if metadata:
+            cleaned_content = content[: start.start()] + content[end.end() :]
+            return metadata, cleaned_content.lstrip()
+    return {}, content
 
 
 def _infer_customer_role(text: str) -> str:
@@ -59,19 +80,31 @@ def load_documents() -> list[dict]:
             continue
         raw_content = md_file.read_text(encoding="utf-8")
         front_matter, content = _parse_front_matter(raw_content)
-        doc_type = front_matter.get("doc_type") or ("legal" if "legal" in md_file.parts else "news")
+        embedded_metadata, content = _extract_embedded_metadata(content)
+        document_metadata = {**embedded_metadata, **front_matter}
+        doc_type = document_metadata.get("doc_type") or ("legal" if "legal" in md_file.parts else "news")
         title_match = re.search(r"^#\s+(.+)$", content, flags=re.MULTILINE)
         source_url_match = re.search(r"^\*\*Source:\*\*\s*(https?://\S+)", content, flags=re.MULTILINE)
+        legacy_source_url_match = re.search(
+            r"^(?:source_url|url):\s*(https?://\S+)",
+            content,
+            flags=re.MULTILINE | re.IGNORECASE,
+        )
         metadata = {
             "source": md_file.name,
             "relative_path": str(md_file.relative_to(STANDARDIZED_DIR)).replace("\\", "/"),
             "type": doc_type,
-            "title": front_matter.get("title") or (title_match.group(1).strip() if title_match else md_file.stem),
-            "url": front_matter.get("url") or (source_url_match.group(1) if source_url_match else ""),
-            "category": front_matter.get("category") or "ecommerce-policy",
-            "version": front_matter.get("version") or "unknown",
-            "date": front_matter.get("date_crawled") or "",
-            "customer_role": front_matter.get("customer_role") or _infer_customer_role(content),
+            "title": title_match.group(1).strip() if title_match else document_metadata.get("title", md_file.stem),
+            "url": (
+                document_metadata.get("url")
+                or document_metadata.get("source_url")
+                or (source_url_match.group(1) if source_url_match else "")
+                or (legacy_source_url_match.group(1) if legacy_source_url_match else "")
+            ),
+            "category": document_metadata.get("category") or "ecommerce-policy",
+            "version": document_metadata.get("version") or document_metadata.get("document_version") or "unknown",
+            "date": document_metadata.get("date_crawled") or document_metadata.get("retrieved_at") or "",
+            "customer_role": document_metadata.get("customer_role") or _infer_customer_role(content),
         }
         documents.append({"content": content, "metadata": metadata})
     return documents

@@ -1,341 +1,437 @@
-# Tài liệu kỹ thuật — E-commerce Support RAG Chatbot
+# E-commerce Support RAG Chatbot
 
-## 1. Dự án giải quyết vấn đề gì?
+Tài liệu kỹ thuật của dự án chatbot hỏi đáp chính sách thương mại điện tử, xây dựng theo RAG (Retrieval-Augmented Generation). Tài liệu này mô tả đúng cách hệ thống đang vận hành, cách đọc điểm số trên UI và quy trình chạy/demo/evaluation.
 
-Dự án xây dựng chatbot hỏi đáp về chính sách thương mại điện tử, tập trung vào các nội dung như thanh toán, trả hàng/hoàn tiền, vận chuyển và quy định người bán.
+## 1. Bài toán và mục tiêu
 
-Thay vì để mô hình ngôn ngữ trả lời theo kiến thức tổng quát và có nguy cơ bịa thông tin, hệ thống dùng **RAG (Retrieval-Augmented Generation)**: tìm các đoạn tài liệu liên quan trước, sau đó chỉ dùng các đoạn đó để tạo câu trả lời có trích dẫn nguồn.
+Người dùng cần tra cứu chính sách như thanh toán, trả hàng/hoàn tiền, giao hàng, quy định người bán và các hướng dẫn hỗ trợ. Các tài liệu này dài, nằm ở nhiều tệp và thường dùng ngôn ngữ khác với cách người dùng đặt câu hỏi.
 
-Các vấn đề chính cần xử lý:
+Mục tiêu của hệ thống là:
 
-| Vấn đề | Cách giải quyết trong dự án |
-|---|---|
-| Tài liệu có nhiều định dạng | Chuẩn hóa PDF/DOCX/JSON/Markdown thành Markdown. |
-| Câu hỏi diễn đạt đa dạng | Dùng semantic search bằng embedding. |
-| Câu hỏi chứa thuật ngữ/số liệu chính xác | Dùng BM25 lexical search. |
-| Một retriever đơn lẻ có thể bỏ sót kết quả | Kết hợp Dense + BM25 bằng Weighted RRF. |
-| Kết quả đầu vào LLM có thể nhiễu | Dùng Cross-Encoder reranking. |
-| Câu hỏi nối tiếp phụ thuộc ngữ cảnh | Query Expansion dựa vào lịch sử chat. |
-| Nguy cơ hallucination | Prompt ràng buộc context và citation theo từng nguồn. |
+- Tìm đúng đoạn tài liệu liên quan trước khi trả lời.
+- Kết hợp tìm theo ý nghĩa và tìm theo từ khóa chính xác.
+- Trả lời có citation theo tên tệp và mục tài liệu.
+- Hiển thị nguồn web chính thức khi metadata có URL.
+- Không bịa nguồn: nếu LLM không tạo được câu trả lời có citation hợp lệ thì chuyển sang bằng chứng trích xuất trực tiếp.
+- Đánh giá định lượng Dense-only và Hybrid RAG bằng Golden Dataset.
 
----
+Phạm vi kiến thức là corpus chính sách/hướng dẫn TMĐT trong repository. Đây không phải tư vấn pháp lý; nội dung trên website nguồn có thể thay đổi theo thời gian.
 
-## 2. Luồng xử lý tổng thể
+## 2. Kiến trúc tổng thể
 
-```mermaid
+~~~mermaid
 flowchart LR
-    A[Tài liệu PDF / JSON / Markdown] --> B[Chuẩn hóa Markdown]
-    B --> C[Chunking]
-    C --> D[Embedding + ChromaDB]
-    C --> E[BM25 Index]
-    U[Người dùng đặt câu hỏi] --> Q[Query Expansion + Memory]
-    Q --> F[Dense Search]
-    Q --> G[BM25 Search]
+    A[Tài liệu PDF, JSON, Markdown] --> B[Chuẩn hóa Markdown]
+    B --> C[Chunking + metadata]
+    C --> D[ChromaDB + embedding]
+    C --> E[BM25 index]
+
+    U[Người dùng] --> M[Memory + Query Expansion]
+    M --> F[Dense semantic search]
+    M --> G[BM25 lexical search]
     F --> H[Weighted RRF]
     G --> H
-    H --> I[Cross-Encoder Reranking]
-    I --> J{Confidence đủ cao?}
-    J -- Có --> K[LLM Generation + Citation]
-    J -- Không --> L[Structural Fallback]
+    H --> I[Cross-Encoder reranking]
+    I --> J{Dense confidence đủ ngưỡng?}
+    J -- Có --> K[LLM grounded generation]
+    J -- Không --> L[Structural PageIndex fallback]
     L --> K
-    K --> M[Streamlit UI + Source Cards]
-```
+    K --> V[Citation validator / extractive fallback]
+    V --> W[Streamlit + source cards]
+~~~
 
----
+Luồng được tách thành ba nhóm:
+
+| Nhóm | Thành phần | Vai trò |
+|---|---|---|
+| Ingestion | Task 1–4 | Thu thập, chuẩn hóa, chunk và index dữ liệu. |
+| Retrieval | Task 5–9 | Dense search, BM25, fusion, rerank và fallback. |
+| Answer & quality | Task 10, Streamlit, evaluation | Sinh câu trả lời, hậu kiểm citation, demo và A/B evaluation. |
 
 ## 3. Dữ liệu và chuẩn hóa
 
-### Nguồn dữ liệu
+### 3.1. Nguồn dữ liệu
 
-- Văn bản chính sách ở `data/landing/legal/`.
-- Bài hướng dẫn/hỗ trợ khách hàng ở `data/landing/news/`.
-- Dữ liệu sau chuẩn hóa được lưu tại `data/standardized/`.
+| Thư mục | Nội dung | Tình trạng corpus hiện tại |
+|---|---|---|
+| <code>data/landing/legal/</code> | Tài liệu PDF/DOCX chính sách gốc | 3 PDF nguồn |
+| <code>data/landing/news/</code> | JSON/Markdown hướng dẫn và thông báo | 15 tệp dữ liệu |
+| <code>data/standardized/</code> | Markdown đã chuẩn hóa cho retrieval | 18 Markdown, gồm 3 legal và 15 news |
+| <code>chroma_db/</code> | ChromaDB persistent vector store | Sinh lại từ standardized corpus |
 
-### Chuẩn hóa Markdown
+Task 1 chỉ xác thực sự tồn tại và kích thước hợp lệ của ít nhất 3 tài liệu PDF/DOCX thật; không tạo tài liệu chính sách giả. Task 2 dùng Crawl4AI khi có mạng, đồng thời có dữ liệu mẫu để pipeline vẫn có thể chạy trong môi trường demo offline.
 
-Module `src/task3_convert_markdown.py` sử dụng **MarkItDown** để chuyển PDF/DOCX sang Markdown. Với bài viết JSON, hệ thống giữ lại các metadata quan trọng như:
+### 3.2. Chuẩn hóa Markdown
 
-- `title`
-- `url`
-- `date_crawled`
-- `source_file`
-- `doc_type`
-- `category`
+Module <code>src/task3_convert_markdown.py</code> sử dụng MarkItDown để chuyển PDF/DOCX sang Markdown. JSON news được chuyển thành Markdown và có front matter để giữ provenance.
 
-Khi nạp tài liệu, pipeline bổ sung metadata phục vụ retrieval và citation:
+Metadata được bảo toàn hoặc suy ra gồm:
 
-- `source`, `relative_path`, `type`, `title`
-- `url`, `category`, `version`, `date`
-- `customer_role` (`buyer`, `seller`, hoặc `both`)
-- `chunk_index`, `section`
+- <code>source</code>, <code>relative_path</code>, <code>title</code>, <code>type</code>
+- <code>url</code>, <code>category</code>, <code>version</code>, <code>date</code>
+- <code>customer_role</code>
+- <code>chunk_index</code>, <code>section</code>
 
----
+Task 4 cũng nhận diện metadata kiểu YAML cũ bị đặt sau tiêu đề Markdown. Khối này được tách khỏi nội dung chunk để các trường như <code>doc_id</code> hay <code>source_url</code> không trở thành bằng chứng trả lời.
 
-## 4. Chunking
+## 4. Chunking, embedding và vector store
 
-**Kỹ thuật:** `RecursiveCharacterTextSplitter`.
+### 4.1. Chunking
 
-| Tham số | Giá trị | Lý do chọn |
+Hệ thống dùng <code>RecursiveCharacterTextSplitter</code>.
+
+| Tham số | Giá trị | Lý do |
 |---|---:|---|
-| `chunk_size` | 800 ký tự | Một chunk đủ chứa một ý chính/chính sách nhưng vẫn gọn cho retrieval và LLM context. |
-| `chunk_overlap` | 100 ký tự | Giữ lại thông tin ở ranh giới giữa hai chunk, giảm nguy cơ tách rời điều kiện và ngoại lệ. |
-| Thứ tự separator | Heading → đoạn → dòng → câu → từ | Ưu tiên giữ cấu trúc Markdown và ý nghĩa văn bản. |
+| Chunk size | 800 ký tự | Đủ chứa một quy định/điều kiện nhưng vẫn gọn để retrieval và LLM xử lý. |
+| Chunk overlap | 100 ký tự | Giữ ngữ cảnh ở ranh giới giữa hai chunk. |
+| Separator | Heading → paragraph → line → sentence → word | Ưu tiên cấu trúc Markdown và hạn chế cắt giữa ý. |
 
-Mỗi chunk giữ lại section heading gần nhất. Nhờ đó UI và citation có thể hiển thị dạng:
+Mỗi chunk lưu heading gần nhất trong trường <code>section</code>. Đây là phần thứ hai của citation, ví dụ:
 
-```text
-[Nguồn: tra_hang_hoan_tien.md, Mục: Thời hạn gửi yêu cầu]
-```
+    [Nguồn: tra_hang_hoan_tien.md, Mục: Thời hạn gửi yêu cầu]
 
----
+### 4.2. Embedding
 
-## 5. Embedding và Dense Retrieval
-
-### Embedding model
-
-Hệ thống sử dụng:
-
-```text
-sentence-transformers/all-MiniLM-L6-v2
-```
-
-| Thuộc tính | Giá trị |
+| Thuộc tính | Cấu hình |
 |---|---|
-| Số chiều vector | 384 |
-| Cách chạy | Local, không cần API key |
-| Chuẩn hóa vector | L2-normalized |
-| Vector database | ChromaDB persistent |
-| Kho lưu trữ | `chroma_db/` |
+| Model | <code>sentence-transformers/all-MiniLM-L6-v2</code> |
+| Số chiều | 384 |
+| Chạy ở đâu | Local, không cần embedding API key |
+| Normalization | L2-normalized |
+| Vector store | ChromaDB persistent |
 | Similarity | Cosine similarity |
 
-### Vì sao dùng embedding?
+Embedding giúp tìm các câu diễn đạt tương đương. Ví dụ, câu “đổi trả hàng trong bao lâu?” vẫn có thể khớp với đoạn “thời hạn gửi yêu cầu trả hàng/hoàn tiền” dù các từ không hoàn toàn giống nhau.
 
-Dense retrieval tìm được ý nghĩa gần nhau dù cách diễn đạt khác nhau. Ví dụ câu hỏi “đổi trả hàng trong bao lâu?” vẫn có thể tìm tới đoạn “thời hạn gửi yêu cầu trả hàng/hoàn tiền” dù không trùng hoàn toàn từng từ.
+## 5. Retrieval pipeline
 
-Pipeline lấy tối đa **20 dense candidates** trước khi fusion.
+### 5.1. Dense semantic search
 
----
+<code>src/task5_semantic_search.py</code> tạo embedding của query, truy vấn ChromaDB và trả về tối đa 20 chunk. Chroma dùng cosine distance nên hệ thống chuyển thành:
 
-## 6. Lexical Retrieval với BM25
+    dense_cosine_similarity = 1 - cosine_distance
 
-BM25 là lexical search, phù hợp với những truy vấn cần khớp từ khóa chính xác như:
+Điểm dense được giới hạn trong khoảng 0–1 và sắp xếp giảm dần.
 
-- số ngày: `15 ngày`, `3–7 ngày`;
-- tên chính sách;
-- thuật ngữ như `ShopeePay`, `COD`, `Sao Quả Tạ`;
-- mã/số hiệu/quy định cụ thể.
+### 5.2. Lexical search với BM25
 
-Tokenizer hiện dùng regex hỗ trợ tiếng Việt:
+<code>src/task6_lexical_search.py</code> dùng BM25Okapi với tokenizer regex hỗ trợ Unicode/tiếng Việt. BM25 hữu ích cho:
 
-```python
-re.findall(r"[\wÀ-ỹ]+", text.lower(), flags=re.UNICODE)
-```
+- Số ngày, số tiền, điều kiện cụ thể.
+- Tên sản phẩm, tên chính sách, mã hoặc thuật ngữ chính xác.
+- Từ khóa như COD, ShopeePay, Sao Quả Tạ.
 
-BM25 trả tối đa **20 sparse candidates** có điểm dương. Đây là điểm khác với dense retrieval: BM25 ưu tiên xuất hiện từ khóa, còn embedding ưu tiên tương đồng ngữ nghĩa.
+Khác biệt chính:
 
----
+| Dense semantic search | BM25 lexical search |
+|---|---|
+| So khớp ý nghĩa bằng vector embedding | So khớp các token xuất hiện trong văn bản |
+| Tốt khi người dùng diễn đạt khác tài liệu | Tốt khi cần đúng từ khóa, số liệu, tên riêng |
+| Score là cosine similarity | Score là BM25 raw score, chỉ so sánh trong cùng một query |
 
-## 7. Hybrid Retrieval và Weighted RRF
+### 5.3. Weighted RRF fusion
 
-Hai retriever chạy song song bằng `ThreadPoolExecutor`:
+Dense và BM25 chạy song song bằng <code>ThreadPoolExecutor</code>, mỗi nhánh lấy tối đa 20 candidates. Kết quả được gộp bằng Weighted Reciprocal Rank Fusion:
 
-1. Dense search từ ChromaDB.
-2. BM25 lexical search.
+    RRF(d) = Σ wᵢ / (k + rankᵢ(d)), với k = 60
 
-Kết quả được gộp bằng **Weighted Reciprocal Rank Fusion (RRF)**:
+Slider α trên sidebar là trọng số Dense:
 
-\[
-\operatorname{RRF}(d) = \sum_i \frac{w_i}{k + rank_i(d)}
-\]
+    dense weight = α
+    BM25 weight = 1 - α
 
-Trong đó:
+RRF chỉ dùng thứ hạng nên không cộng trực tiếp cosine score với BM25 raw score, vốn thuộc hai thang đo khác nhau.
 
-- `k = 60` giúp tránh một kết quả đứng đầu tuyệt đối lấn át các kết quả khác.
-- `w_i` là trọng số từng retriever.
-- Sidebar Streamlit có slider `α` để điều chỉnh ưu tiên Dense Search và BM25.
-- Mặc định `α = 0.5`, tức hai retriever có trọng số như nhau.
+### 5.4. Cross-Encoder reranking và Cơ chế chấm điểm Reranking
 
-Lý do dùng RRF: điểm Dense cosine và điểm BM25 không cùng thang đo, nên cộng trực tiếp sẽ không đáng tin cậy. RRF chỉ dựa vào thứ hạng, vì vậy phù hợp để fusion nhiều retriever.
+Sau bước Weighted RRF Fusion, các ứng viên (candidates) tiếp tục được tái xếp hạng (rerank) bằng mô hình **Cross-Encoder**:
 
----
+    cross-encoder/ms-marco-MiniLM-L-6-v2
 
-## 8. Reranking
+#### Cơ chế hoạt động & So sánh với Bi-Encoder (Dense Search):
+* **Bi-Encoder (ChromaDB Vector)**: Mã hóa Query và Chunk riêng biệt thành 2 vector độc lập, sau đó tính Cosine Similarity. Ưu điểm là rất nhanh (tra cứu trên HNSW index), nhưng bị mất đi sự tương tác chi tiết giữa các từ của Query và Context.
+* **Cross-Encoder**: Đưa **đồng thời** cặp `(Query, Chunk)` qua các lớp Attention Layer của Transformer. Mô hình soi chiếu trực tiếp từng từ trong câu hỏi với từng từ trong văn bản, giúp đánh giá ngữ cảnh và mối quan hệ ngữ nghĩa tinh vi hơn nhiều.
 
-Sau RRF, các candidates được xếp hạng lại bằng Cross-Encoder:
+#### Công thức chấm điểm & Chuẩn hóa:
+1. **Raw CE Logit**: Cross-Encoder tính toán và trả về một điểm Logit không bị chặn (unbounded logit, ví dụ $+6.4811$ hoặc $-1.234$).
+2. **Sigmoid Normalization**: Để hiển thị giao diện dưới dạng phần trăm (%), hệ thống áp dụng hàm Sigmoid:
+   $$\text{CE relevance} = \sigma(\text{logit}) = \frac{1}{1 + e^{-\text{logit}}}$$
+   *Ví dụ*: Logit $+6.4811 \xrightarrow{\text{Sigmoid}} 0.9985 \rightarrow 99.9\%$.
+3. **Sắp xếp**: Danh sách kết quả cuối cùng được sắp xếp giảm dần theo điểm `normalized_score` (tương đương với thứ tự `cross_encoder_raw_score`). Nếu việc tải/chạy mô hình Cross-Encoder gặp lỗi, hệ thống sẽ tự động fallback về giữ nguyên thứ hạng `rrf_score`.
 
-```text
-cross-encoder/ms-marco-MiniLM-L-6-v2
-```
+### 5.5. Confidence gate và PageIndex fallback
 
-Cross-Encoder nhận đồng thời cặp `(query, chunk)` và đánh giá mức liên quan chi tiết hơn embedding bi-encoder. Hệ thống lấy Top-K chunks sau reranking để đưa vào LLM.
+Confidence gate không dùng RRF hay Cross-Encoder. Nó là trung bình `dense_score` của candidates cuối, rồi so với `score_threshold` (mặc định 0.35).
 
-Nếu model không tải được, pipeline không dừng hoàn toàn mà giữ lại thứ hạng RRF làm phương án dự phòng.
+- Confidence đủ ngưỡng: dùng hybrid candidates.
+- Confidence thấp hoặc không có candidate: dùng `src/task8_pageindex_vectorless.py`.
 
-### Ý nghĩa các loại score trên giao diện
+“PageIndex” trong dự án này là structural fallback local, không phải PageIndex cloud SDK. Nó duyệt Markdown theo heading/section, đo keyword coverage của query và trả về section phù hợp. Vì chạy local nên không gửi corpus ra dịch vụ bên ngoài.
 
-Các retriever không dùng cùng một thang điểm, nên UI hiển thị rõ loại score thay vì gọi chung là `score`:
+## 6. Cách đọc score trên giao diện
 
-| Nhãn UI | Thang đo | Ý nghĩa |
-|---|---|---|
-| `CE relevance` | 0–100% | Raw Cross-Encoder logit được sigmoid-normalize để dễ đọc; dùng để so thứ hạng trong cùng một query, không phải xác suất tuyệt đối. |
-| `Dense cosine` | 0–100% | Cosine similarity của embedding, dùng cho confidence/fallback threshold. |
-| `RRF rank` | số nhỏ | Điểm fusion dựa trên vị trí xếp hạng, không phải phần trăm. |
-| `BM25 raw` | số dương | Điểm khớp từ khóa, chỉ so sánh trong cùng một query. |
-| `Keyword coverage` | 0–100% | Mức độ chồng lấp từ khóa của structural fallback. |
+Các score không cùng ý nghĩa và không nên so sánh trực tiếp.
 
-Ví dụ raw logit Cross-Encoder `6.7523` được UI hiển thị là `CE relevance: 99.9%`, đồng thời phần chi tiết vẫn giữ raw logit, Dense cosine và RRF rank để kiểm tra.
+| Nhãn UI | Nguồn | Thang đo | Cách diễn giải đúng |
+|---|---|---|---|
+| Dense cosine | ChromaDB | 0–100% | Độ tương đồng embedding. Dùng cho confidence gate. Không phải xác suất đúng tuyệt đối. |
+| BM25 raw | BM25Okapi | Số dương không bị chặn | Chỉ so sánh các kết quả của cùng một query. |
+| RRF rank | Weighted RRF | Số nhỏ, thường khoảng 0.01 | Điểm fusion theo vị trí xếp hạng; không phải %. |
+| CE relevance | Cross-Encoder | 0–100% sau sigmoid | Tín hiệu reranking để đọc dễ hơn, không phải xác suất/độ chính xác đã calibration. |
+| Keyword coverage | Structural fallback | 0–100% | Tỷ lệ token query xuất hiện trong section. |
 
----
+Cross-Encoder gốc trả về logit không bị chặn. UI lưu logit gốc và hiển thị thêm bản chuẩn hóa:
 
-## 9. Confidence và Structural Fallback
+    CE relevance = sigmoid(raw CE logit)
 
-Pipeline tính confidence từ trung bình dense cosine score của các candidates cuối. Ngưỡng mặc định là `0.35`.
+Ví dụ logit 6.4811 sẽ thành 99.85%, hiển thị 99.9%. Điều đó **không có nghĩa** tài liệu hoặc câu trả lời đúng 99.9%; sigmoid bão hòa nhanh với logit lớn. Khi demo nên nói:
 
-Nếu confidence thấp hoặc hybrid retrieval không có kết quả, hệ thống dùng fallback vectorless cục bộ trong `src/task8_pageindex_vectorless.py`:
+> CE relevance là điểm xếp hạng được chuẩn hóa để quan sát; không phải confidence đã được hiệu chuẩn. Hãy xem Dense cosine, RRF/BM25 và citation cùng nhau.
 
-- Duyệt toàn bộ Markdown theo cấu trúc heading/section.
-- Tính mức độ chồng lấp từ khóa giữa query và từng section.
-- Trả về các section khớp nhất cùng thông tin source và section.
+Muốn có “confidence %” thực sự cần calibration trên tập gán nhãn độc lập, ví dụ Platt scaling/isotonic regression sau khi thu thập relevance labels.
 
-Fallback này hoạt động local, không cần gửi tài liệu sang dịch vụ bên ngoài. Nó được đặt tên theo vai trò “PageIndex fallback”, nhưng hiện không phải tích hợp PageIndex cloud SDK.
+## 7. Query expansion, memory và xử lý chào hỏi / tâm sự (Small Talk)
 
----
+Streamlit lưu tối đa 20 messages (10 lượt hội thoại gần nhất). Với câu hỏi ngắn/phụ thuộc ngữ cảnh, `src/task09_query_expansion.py` ghép câu hỏi trước đó vào query retrieval. Khi generation, chỉ 6 messages gần nhất được gửi vào prompt để giới hạn context.
 
-## 10. Query Expansion và Conversation Memory
+Ví dụ:
 
-### Conversation Memory
+    Câu trước: Thời hạn trả hàng là bao lâu?
+    Câu sau: Có mất phí không?
+    Query retrieval: Thời hạn trả hàng là bao lâu? — Câu hỏi tiếp theo: Có mất phí không?
 
-`st.session_state.messages` lưu tối đa **20 messages**, tương đương **10 lượt hội thoại** gần nhất.
+Các câu chào hỏi, cảm ơn, hỏi tên bot hoặc tâm sự cảm xúc tự do (như `"xin chào"`, `"hello"`, `"cảm ơn"`, `"chán quá"`, `"mệt quá"`, `"bạn là ai"`...) được nhận diện trước qua bộ phân loại Intent / Small Talk:
+- **Ngắt ghép ngữ cảnh**: Không bị Query Expansion tự động ghép với câu hỏi chính sách trước đó.
+- **Bỏ qua Retrieval**: Tắt hoàn toàn luồng tìm kiếm tài liệu Shopee/TMĐT để không gửi trích dẫn tài liệu ngẫu nhiên/không liên quan.
+- **Phản hồi thân thiện**: Chatbot đáp lời xã giao/đồng cảm và nhắc lại đúng phạm vi hỗ trợ của hệ thống.
 
-### Query Expansion
+## 8. Generation, citation và an toàn
 
-Module `src/task09_query_expansion.py` nhận biết các câu hỏi phụ thuộc ngữ cảnh, ví dụ:
+### 8.1. Grounded generation
 
-```text
-Câu trước: “Thời hạn trả hàng là bao lâu?”
-Câu sau: “Có mất phí không?”
-```
+<code>src/task10_generation.py</code> yêu cầu LLM:
 
-Truy vấn đưa vào retrieval sẽ được mở rộng thành:
-
-```text
-Thời hạn trả hàng là bao lâu? — Câu hỏi tiếp theo: Có mất phí không?
-```
-
-Cách này cải thiện retrieval mà không bắt buộc dùng thêm LLM/API key.
-
----
-
-## 11. Generation, Citation và Failover
-
-### Prompt grounding
-
-Prompt bắt buộc LLM:
-
-1. Chỉ trả lời từ context đã cung cấp.
+1. Chỉ dùng context đã truy xuất.
 2. Không có bằng chứng thì trả lời không thể xác minh.
-3. Gắn citation ngay sau nội dung được khẳng định.
+3. Gắn citation ngay sau mệnh đề có thông tin.
 4. Trả lời bằng tiếng Việt.
 
-### Citation
+Thứ tự failover provider là Gemini → OpenRouter → OpenAI. Không có API key vẫn chạy được ở chế độ extractive fallback.
 
-Mỗi chunk được format cùng nhãn citation gồm source và section. Source cards trên Streamlit hiển thị:
+### 8.2. Hậu kiểm citation
 
-- tên tài liệu;
-- URL nguồn nếu có;
-- score;
-- retrieval source (`hybrid` hoặc `pageindex`);
-- nội dung chunk.
+Citation hợp lệ phải có đúng cả source và section của một retrieved chunk:
 
-### LLM failover
+    [Nguồn: ten_file.md, Mục: ten_heading]
 
-Thứ tự provider:
+Sau khi LLM trả lời, validator:
 
-1. Gemini API;
-2. OpenRouter;
-3. OpenAI.
+- Chuẩn hóa biến thể Source/Section về đúng nhãn tiếng Việt.
+- Từ chối tên tệp hoặc mục không có trong context.
+- Từ chối đoạn nội dung dài không kèm citation.
+- Từ chối output có front matter/metadata tài liệu.
 
-Nếu không có API key hoặc provider gặp lỗi, hệ thống chuyển sang **extractive fallback**: hiển thị các đoạn bằng chứng liên quan kèm citation thay vì tự tạo thông tin mới.
-
----
-
-## 12. Evaluation Pipeline
-
-Golden Dataset nằm ở:
-
-```text
-group_project/evaluation/golden_dataset.json
-```
-
-Hiện có 16 cặp câu hỏi, đáp án mong đợi và expected context.
-
-Evaluation hiện chạy A/B giữa:
-
-| Config | Pipeline |
+| Trạng thái | Ý nghĩa |
 |---|---|
-| A | Dense-only Chroma retrieval |
-| B | Dense + BM25 + Weighted RRF + Cross-Encoder + fallback |
+| <code>validated</code> | LLM trả lời và citation đã được hậu kiểm. |
+| <code>extractive_fallback</code> | LLM thiếu/sai citation; hệ thống hiển thị bằng chứng đã làm sạch, có citation chuẩn. |
+| <code>no_evidence</code> | Không có context phù hợp để trả lời. |
+| <code>not_required</code> | Chào hỏi/cảm ơn, không phải câu hỏi chính sách. |
 
-Khi cấu hình evaluator API, script dùng **RAGAS 0.1.21** để chạy bốn metric LLM-based:
+Extractive fallback loại heading Markdown, YAML/front matter, các trường như <code>doc_id</code>, <code>source_url</code> và <code>title</code>. Vì vậy metadata không bị render thành tiêu đề lớn trong chat.
 
-1. Faithfulness.
-2. Answer Relevancy.
-3. Context Recall.
-4. Context Precision.
+Khi fallback còn evidence, hệ thống trả tối đa 3 chunks và cắt mỗi đoạn ở 420 ký tự, sau đó gắn citation chuẩn. Nếu không có evidence nào, hệ thống trả câu không thể xác minh thay vì tự suy đoán.
 
-Thiết lập evaluator trong `.env`:
+### 8.3. Source cards
 
-```text
+Mỗi source card hiển thị:
+
+- Tên tài liệu, loại tài liệu và section.
+- URL nguồn chính thức nếu metadata có URL.
+- Score đúng loại và các score liên quan.
+- Nội dung chunk.
+
+URL được ưu tiên theo metadata trong index; nếu index cũ thiếu URL, UI thử đọc Markdown gốc và cuối cùng dùng map URL cho các tệp legacy.
+
+## 9. Điều khiển trên Streamlit
+
+| Điều khiển | Tác động thật |
+|---|---|
+| Số lượng chunks (top_k) | Số chunk giữ lại sau reranking/fallback để tạo context. |
+| Ngưỡng Score Threshold | Ngưỡng trung bình Dense cosine để quyết định dùng hybrid hay structural fallback. |
+| Ưu tiên Semantic Search (α) | Trọng số Dense trong Weighted RRF; phần còn lại dành cho BM25. |
+| Sử dụng Cross-Encoder Reranking | Bật/tắt bước Cross-Encoder sau fusion. |
+| Xóa lịch sử hội thoại | Xóa memory của phiên Streamlit hiện tại. |
+
+Sau khi thay đổi tài liệu, logic chunking hoặc metadata, cần re-index trước khi kiểm tra UI để ChromaDB không còn dữ liệu cũ.
+
+## 10. Evaluation A/B
+
+### 10.1. Golden Dataset và cấu hình
+
+File <code>group_project/evaluation/golden_dataset.json</code> có 16 câu hỏi với:
+
+- <code>question</code>
+- <code>expected_answer</code>
+- <code>expected_context</code>
+
+Hai nhánh được so sánh:
+
+| Config | Retrieval | Generation policy |
+|---|---|---|
+| A | Dense-only ChromaDB | Cùng policy generation/citation với Config B |
+| B | Dense + BM25 + Weighted RRF + Cross-Encoder + fallback | Cùng policy generation/citation với Config A |
+
+### 10.2. Bốn metric RAGAS
+
+Khi có evaluator API, script dùng RAGAS 0.1-compatible với:
+
+| Metric | Đo lường |
+|---|---|
+| Faithfulness | Câu trả lời có bám bằng chứng context không. |
+| Answer Relevancy | Câu trả lời có giải quyết đúng câu hỏi không. |
+| Context Recall | Context truy xuất có bao phủ evidence/ground truth không. |
+| Context Precision | Các context được ưu tiên có thực sự hữu ích không. |
+
+Report xuất A/B metrics, chênh lệch từng metric và 5 Worst Performers của Config B cùng nguyên nhân/khuyến nghị.
+
+### 10.3. RAGAS thật và offline proxy
+
+Hai loại kết quả này phải được phân biệt:
+
+| Chế độ | Lệnh | Ý nghĩa |
+|---|---|---|
+| RAGAS thật | <code>python group_project/evaluation/eval_pipeline.py --require-ragas</code> | Chỉ thành công khi evaluator/key/model sẵn sàng; phù hợp để nộp/chấm. |
+| Offline proxy | <code>python group_project/evaluation/eval_pipeline.py --offline</code> | Cosine proxy local để demo; **không phải** điểm RAGAS. |
+
+Không truyền flag sẽ thử RAGAS trước và fallback sang offline proxy nếu không khả dụng; report sẽ gắn nhãn backend thực tế. File <code>results.md</code> hiện phải được đọc theo nhãn backend của lần chạy, không được gọi mọi con số trong đó là RAGAS nếu nó ghi “Offline cosine proxy”.
+
+## 11. Cài đặt và chạy
+
+README khuyến nghị Python 3.10 hoặc 3.11. Tại thư mục dự án:
+
+~~~powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+Copy-Item .env.example .env
+~~~
+
+Cấu hình ít nhất một provider để có generation tự nhiên; nếu không chatbot vẫn dùng extractive fallback:
+
+~~~text
+GEMINI_API_KEY=...
+# hoặc OPENROUTER_API_KEY=...
+# hoặc OPENAI_API_KEY=...
+~~~
+
+Để chạy RAGAS thật, đặt thêm:
+
+~~~text
 RAGAS_EVALUATOR_API_KEY=...
 RAGAS_EVALUATOR_MODEL=gpt-4o-mini
 RAGAS_EVALUATOR_EMBEDDING_MODEL=text-embedding-3-small
-```
+# RAGAS_EVALUATOR_BASE_URL=...  # chỉ khi dùng endpoint tương thích OpenAI
+~~~
 
-Sau đó chạy lệnh strict sau để chỉ chấp nhận kết quả RAGAS thật:
+Thứ tự chạy đầy đủ:
 
-```powershell
-python group_project/evaluation/eval_pipeline.py --require-ragas
-```
-
-Report tự động xuất bảng so sánh A/B, thay đổi từng metric và 5 **Worst Performers** của Config B, gồm nguyên nhân khả dĩ và đề xuất cải thiện.
-
-Nếu không có evaluator API, chạy không có `--require-ragas` sẽ dùng cosine proxy local để demo không bị dừng. Report sẽ gắn nhãn rõ đó là **offline fallback, không phải điểm RAGAS**.
-
----
-
-## 13. Cách chạy dự án
-
-```powershell
-# Kích hoạt môi trường Python đã cài dependencies
-.\.venv\Scripts\Activate.ps1
-
-# Chuẩn hóa dữ liệu và build lại ChromaDB
+~~~powershell
+# Kiểm tra / tạo dữ liệu
+python -m src.task1_collect_legal_docs
+python -m src.task2_crawl_news
 python -m src.task3_convert_markdown
+
+# Rebuild index sau khi standardized corpus hoặc metadata thay đổi
 python -m src.task4_chunking_indexing
 
-# Chạy test
+# Kiểm thử pipeline
 pytest tests/ -v
 
-# Khởi động giao diện
+# Chạy chatbot
 streamlit run app.py
 
-# Chạy evaluation A/B RAGAS thật
+# Chạy benchmark thật
 python group_project/evaluation/eval_pipeline.py --require-ragas
-```
+~~~
 
----
+## 12. Kịch bản demo đề xuất
 
-## 14. Giới hạn và hướng nâng cấp
+1. Mở Streamlit, cho thấy sidebar: top_k, threshold, α và reranking.
+2. Hỏi một câu semantic, ví dụ “Thời hạn yêu cầu trả hàng/hoàn tiền là bao lâu?”.
+3. Mở source cards, kiểm tra citation, section và link nguồn.
+4. Hỏi câu follow-up “Có mất phí không?” để minh họa memory/query expansion.
+5. Chỉnh α hoặc tắt reranking và quan sát thay đổi thứ hạng source.
+6. Mở tab Evaluation để trình bày A/B, backend metric và Worst Performers.
+7. Giải thích score: CE relevance dùng cho xếp hạng, không phải xác suất đúng tuyệt đối.
+
+## 13. Kiểm thử và xử lý sự cố
+
+| Hiện tượng | Nguyên nhân thường gặp | Cách xử lý |
+|---|---|---|
+| Không có kết quả Dense/BM25 | Chưa build index hoặc corpus trống | Chạy lại Task 3 rồi Task 4. |
+| Source card không có link | Index cũ thiếu metadata URL | Re-index; UI vẫn có fallback từ Markdown/map URL. |
+| Chat hiển thị metadata hoặc heading lớn | Chunk lấy từ index cũ hoặc LLM output không hợp lệ | Chạy lại Task 4; citation validator và extractive cleaner đã chặn output mới. |
+| CE relevance gần 100% | Sigmoid của Cross-Encoder logit bão hòa | Đọc raw CE logit, Dense cosine và citation; không coi đó là probability. |
+| Evaluation báo Offline cosine proxy | Thiếu evaluator key/RAGAS không khả dụng | Cấu hình evaluator rồi chạy với <code>--require-ragas</code>. |
+| Virtualenv báo không tìm thấy Python | Môi trường được tạo từ Python đã bị gỡ | Tạo môi trường mới bằng <code>py -3.11 -m venv .venv311</code>, kích hoạt nó và cài lại requirements. |
+
+Các regression test bổ sung:
+
+- <code>tests/test_citation_validation.py</code>: citation bịa/sai/mất citation phải bị từ chối.
+- <code>tests/test_generation_fallback.py</code>: chào hỏi không vào RAG; fallback không lộ front matter.
+- <code>tests/test_score_semantics.py</code>: tách Cross-Encoder raw logit, normalized display và RRF score.
+
+## 14. Quyền riêng tư, giới hạn và hướng nâng cấp
+
+### 14.1. Quyền riêng tư
+
+Embedding, BM25, ChromaDB và structural fallback chạy local. Tuy nhiên, khi cấu hình Gemini, OpenRouter hoặc OpenAI, context được truy xuất sẽ được gửi tới provider tương ứng để tạo câu trả lời. Khi chạy RAGAS thật, question, answer, context và ground truth cũng được gửi tới evaluator đã cấu hình.
+
+Không đưa API key vào source code, ảnh chụp màn hình hoặc tài liệu nộp bài. Chỉ đặt chúng trong <code>.env</code>, và giữ <code>.env</code> ngoài version control.
+
+### 14.2. Giới hạn và roadmap
 
 | Hiện tại | Hướng nâng cấp |
 |---|---|
-| `all-MiniLM-L6-v2` nhẹ nhưng không tối ưu cho tiếng Việt | Thử `BAAI/bge-m3` hoặc embedding tiếng Việt chuyên dụng. |
-| BM25 cần từ khóa cùng ngôn ngữ | Thêm synonym dictionary/song ngữ hoặc query translation. |
-| Fallback là structural local search | Tích hợp PageIndex cloud SDK nếu có yêu cầu sử dụng dịch vụ này. |
-| RAGAS cần evaluator API riêng | Dùng `--require-ragas` khi chấm điểm để không nhận metric proxy. |
-| LLM có thể trả lời bằng format citation không đúng | Hệ thống đã hậu kiểm source + section; câu trả lời không hợp lệ chuyển sang extractive fallback. |
-| Chưa có deployment | Deploy lên Hugging Face Spaces, Render hoặc Streamlit Community Cloud. |
+| all-MiniLM-L6-v2 nhẹ nhưng không chuyên biệt tiếng Việt | Thử embedding multilingual như BGE-M3 và đánh giá lại trên Golden Dataset. |
+| BM25 dùng tokenizer regex đơn giản | Thêm synonym dictionary, word segmentation hoặc query translation. |
+| CE relevance chưa được calibration | Thu thập relevance labels và calibration riêng. |
+| Structural PageIndex là local fallback | Tích hợp PageIndex SDK thật nếu dự án cần cloud index. |
+| Corpus có thể cũ so với website nguồn | Đặt lịch crawl/re-index và lưu version/ngày thu thập. |
+| Evaluation cần evaluator API để có RAGAS thật | Giữ strict mode trong CI trước khi xuất report nộp bài. |
 
-## 15. Kết luận
+## 15. Mapping Task 1–10 và bản đồ mã nguồn
 
-Hệ thống sử dụng kiến trúc RAG hybrid để kết hợp ưu điểm của semantic search và lexical search. Chunking có overlap giúp giữ ngữ cảnh, embedding + ChromaDB tìm ý nghĩa, BM25 giữ khả năng khớp chính xác, Weighted RRF hợp nhất hai nguồn, và Cross-Encoder tinh chỉnh Top-K context trước khi sinh câu trả lời. Các cơ chế memory, query expansion, fallback và citation giúp chatbot hữu ích hơn cho câu hỏi chính sách thương mại điện tử nhiều lượt.
+| Task | Deliverable chính | Module |
+|---:|---|---|
+| 1 | Kiểm tra tối thiểu 3 tài liệu chính sách nguồn | <code>task1_collect_legal_docs.py</code> |
+| 2 | Crawl/lưu bài hướng dẫn, có offline sample fallback | <code>task2_crawl_news.py</code> |
+| 3 | Chuẩn hóa dữ liệu sang Markdown | <code>task3_convert_markdown.py</code> |
+| 4 | Chunking, embedding và ChromaDB indexing | <code>task4_chunking_indexing.py</code> |
+| 5 | Dense semantic search | <code>task5_semantic_search.py</code> |
+| 6 | BM25 lexical search | <code>task6_lexical_search.py</code> |
+| 7 | Weighted RRF và Cross-Encoder reranking | <code>task7_reranking.py</code> |
+| 8 | Structural/PageIndex local fallback | <code>task8_pageindex_vectorless.py</code> |
+| 9 | Hybrid retrieval, confidence gate và fallback logic | <code>task9_retrieval_pipeline.py</code> |
+| 10 | Generation, citation validation và extractive fallback | <code>task10_generation.py</code> |
+
+| File | Vai trò |
+|---|---|
+| <code>app.py</code> | Streamlit UI, controls, source cards và hiển thị score. |
+| <code>src/task1_collect_legal_docs.py</code> | Kiểm tra tài liệu pháp lý nguồn. |
+| <code>src/task2_crawl_news.py</code> | Crawl/tạo dữ liệu hỗ trợ. |
+| <code>src/task3_convert_markdown.py</code> | Chuẩn hóa landing data sang Markdown. |
+| <code>src/task4_chunking_indexing.py</code> | Chunking, embedding, metadata và ChromaDB indexing. |
+| <code>src/task5_semantic_search.py</code> | Dense cosine search. |
+| <code>src/task6_lexical_search.py</code> | BM25 lexical search. |
+| <code>src/task7_reranking.py</code> | Weighted RRF và Cross-Encoder reranking. |
+| <code>src/task8_pageindex_vectorless.py</code> | Structural local fallback. |
+| <code>src/task9_retrieval_pipeline.py</code> | Orchestration retrieval và confidence gate. |
+| <code>src/task10_generation.py</code> | Grounded generation, citation validation và extractive fallback. |
+| <code>group_project/evaluation/eval_pipeline.py</code> | A/B evaluation, RAGAS và report. |
+
+## 16. Kết luận
+
+Đây là RAG chatbot hybrid: embedding/ChromaDB giải quyết tương đồng ngữ nghĩa, BM25 bảo vệ các từ khóa chính xác, Weighted RRF kết hợp hai tín hiệu, Cross-Encoder tinh chỉnh thứ hạng, còn structural fallback và citation validator bảo vệ hệ thống khi retrieval/generation không chắc chắn. Mọi câu trả lời chính sách cần được đọc cùng citation và link nguồn, thay vì chỉ dựa vào một score hiển thị trên giao diện.

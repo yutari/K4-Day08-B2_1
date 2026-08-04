@@ -26,6 +26,11 @@ def _sections(content: str) -> list[tuple[str, str]]:
     return output
 
 
+_STOPWORDS = {
+    "là", "ai", "và", "hoặc", "của", "trong", "cho", "các", "những", "có", "bị", "được", "khi", "này", "với", "gì", "thế", "nào"
+}
+
+
 def pageindex_search(query: str, top_k: int = 5) -> list[dict]:
     """Search document sections structurally using exact lexical coverage.
 
@@ -33,6 +38,7 @@ def pageindex_search(query: str, top_k: int = 5) -> list[dict]:
     fallback for an empty or low-confidence dense index.
     """
     terms = set(tokenize(query))
+    content_terms = terms - _STOPWORDS
     if not terms or not STANDARDIZED_DIR.exists() or top_k < 1:
         return []
     candidates: list[dict] = []
@@ -41,6 +47,8 @@ def pageindex_search(query: str, top_k: int = 5) -> list[dict]:
         for section, section_content in _sections(content):
             haystack = set(tokenize(f"{section} {section_content}"))
             overlap = len(terms & haystack)
+            if content_terms and not (content_terms & haystack):
+                continue
             if not overlap:
                 continue
             score = overlap / len(terms)

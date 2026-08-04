@@ -30,6 +30,68 @@ _CITATION_LIKE_RE = re.compile(
     flags=re.IGNORECASE,
 )
 _BULLET_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+_METADATA_LINE_RE = re.compile(
+    r"^\s*(?:doc_id|title|source_url|url|retrieved_at|date_crawled|"
+    r"document_version|version|customer_role|category|language|doc_type|"
+    r"relative_path)\s*:\s*.*$",
+    flags=re.IGNORECASE,
+)
+_MARKDOWN_SOURCE_LINE_RE = re.compile(r"^\s*\*\*(?:source|nguồn)\*\*\s*:\s*.*$", flags=re.IGNORECASE)
+_SMALL_TALK_QUERIES = frozenset(
+    {
+        "xin chào",
+        "xin chào bạn",
+        "chào",
+        "chào bạn",
+        "hello",
+        "hi",
+        "hey",
+        "alo",
+        "alô",
+        "cảm ơn",
+        "cảm ơn bạn",
+        "thank you",
+        "thanks",
+        "cảm ơn nhiều",
+        "tạm biệt",
+        "bye",
+        "goodbye",
+        "ok",
+        "oke",
+        "dạ",
+        "ừ",
+        "uh",
+        "hihi",
+        "haha",
+        "chán",
+        "chán quá",
+        "chán thế",
+        "chán vãi",
+        "chán ghê",
+        "nản",
+        "nản quá",
+        "buồn",
+        "buồn quá",
+        "mệt",
+        "mệt quá",
+        "mệt mỏi",
+        "haiz",
+        "haizz",
+        "chat chán quá",
+        "nói chuyện chán quá",
+        "tâm sự",
+        "tâm sự tí",
+        "vui quá",
+        "tốt quá",
+        "tuyệt",
+        "bạn là ai",
+        "bạn tên gì",
+        "bạn là gì",
+        "bạn làm được gì",
+        "bot là ai",
+        "who are you",
+    }
+)
 SYSTEM_PROMPT = """Bạn là trợ lý về chính sách thương mại điện tử.
 Chỉ trả lời bằng dữ kiện có trong CONTEXT. Mỗi đoạn thông tin phải có trích dẫn
 ngay sau câu theo đúng một nhãn được cung cấp: [Nguồn: tên_tệp, Mục: tên_mục].
@@ -114,6 +176,11 @@ def validate_and_normalize_citations(answer: str, chunks: Sequence[dict]) -> str
     """
     if not answer or not answer.strip() or not chunks:
         return None
+    # A model occasionally echoes document front matter along with a valid
+    # citation.  That is provenance, not a user-facing answer, so force the
+    # already-sanitised extractive fallback instead.
+    if any(_METADATA_LINE_RE.match(line) or _MARKDOWN_SOURCE_LINE_RE.match(line) for line in answer.splitlines()):
+        return None
 
     catalog = _citation_catalog(chunks)
     matches = list(_CITATION_RE.finditer(answer))
@@ -194,13 +261,68 @@ def _generate_from_providers(user_message: str) -> str:
     return ""
 
 
+_DOMAIN_ROLES = {"người mua", "người bán", "shopee", "bên vận chuyển", "đơn vị vận chuyển", "chính sách"}
+
+
+def is_out_of_scope(query: str) -> bool:
+    """Return whether a query is clearly outside the e-commerce policy domain."""
+    norm = query.lower().strip()
+    if re.search(r"\b(là ai|ai là|ai thế)\b", norm):
+        if not any(role in norm for role in _DOMAIN_ROLES):
+            return True
+    return False
+
+
+def is_small_talk(query: str) -> bool:
+    """Return whether a query is a standalone greeting, courtesy message, or casual chat.
+
+    Such messages are not policy questions, so running retrieval for them can
+    surface an arbitrary, unrelated document.
+    """
+    normalised = " ".join(re.sub(r"[^\w\s]", " ", query.casefold()).split())
+    if normalised in _SMALL_TALK_QUERIES:
+        return True
+    casual_patterns = (
+        r"^(chán|nản|buồn|mệt|haiz|haha|hihi)(\s+.*)?$",
+        r"^.*(chán quá|nói chuyện chán|chat chán).*$",
+        r"^(bạn|bot) (là ai|tên gì|làm được gì|có thể làm gì)",
+    )
+    return any(re.search(pat, normalised) for pat in casual_patterns)
+
+
+def _clean_evidence_text(content: str) -> str:
+    """Remove Markdown structure and document metadata from fallback evidence.
+
+    Older indexed documents may contain a YAML-like block after a heading.
+    It is useful provenance for indexing but is never an answer for a user.
+    Line-based filtering also protects users before they rebuild an old index.
+    """
+    prose_lines: list[str] = []
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or line == "---" or line.startswith("#"):
+            continue
+        if _METADATA_LINE_RE.match(line) or _MARKDOWN_SOURCE_LINE_RE.match(line):
+            continue
+        line = _BULLET_RE.sub("", line)
+        # Preserve content while removing only common inline Markdown wrappers.
+        line = re.sub(r"`([^`]*)`", r"\1", line)
+        line = re.sub(r"\*\*([^*]+)\*\*", r"\1", line)
+        if line:
+            prose_lines.append(line)
+    return " ".join(prose_lines)
+
+
 def _extractive_fallback(chunks: list[dict]) -> str:
     if not chunks:
         return UNVERIFIABLE_ANSWER
     evidence = []
     for index, chunk in enumerate(chunks[:3], start=1):
-        text = " ".join(chunk.get("content", "").split())
-        evidence.append(f"- {text[:420]} {_citation_label(chunk, index)}")
+        text = _clean_evidence_text(str(chunk.get("content", "")))
+        if text:
+            evidence.append(f"- {text[:420]} {_citation_label(chunk, index)}")
+    if not evidence:
+        return UNVERIFIABLE_ANSWER
     return "Dưới đây là các đoạn thông tin liên quan trong tài liệu:\n\n" + "\n".join(evidence)
 
 
@@ -214,6 +336,40 @@ def generate_with_citation(
     dense_weight: float = 0.5,
 ) -> dict:
     """Run retrieval then generate an answer without ever fabricating sources."""
+    if is_out_of_scope(query):
+        return {
+            "answer": UNVERIFIABLE_ANSWER,
+            "sources": [],
+            "retrieval_source": "none",
+            "citation_validation": "no_evidence",
+        }
+
+    if is_small_talk(query):
+        norm = query.lower()
+        if any(w in norm for w in ("chán", "nản", "buồn", "mệt", "haiz")):
+            answer = (
+                "Mình rất tiếc nếu trải nghiệm chưa như bạn kỳ vọng! "
+                "Mình là Trợ lý AI chuyên hỗ trợ giải đáp các quy định và chính sách Thương mại Điện tử (đổi trả, hoàn tiền, giao hàng, thanh toán...). "
+                "Nếu bạn có câu hỏi nào liên quan đến các quy định này, hãy cho mình biết nhé!"
+            )
+        elif any(w in norm for w in ("bạn là ai", "bạn làm được gì", "bạn tên gì", "bot là ai")):
+            answer = (
+                "Mình là Trợ lý AI hỗ trợ giải đáp các quy định và chính sách Thương mại Điện tử "
+                "(như Shopee: đổi trả hàng, hoàn tiền, thời gian giao hàng, bằng chứng khiếu nại, quy định người bán...). "
+                "Bạn cần mình hỗ trợ thông tin gì không?"
+            )
+        else:
+            answer = (
+                "Xin chào! Mình có thể hỗ trợ bạn về thanh toán, trả hàng/hoàn tiền, "
+                "giao hàng và quy định người bán. Bạn muốn hỏi nội dung nào?"
+            )
+        return {
+            "answer": answer,
+            "sources": [],
+            "retrieval_source": "none",
+            "citation_validation": "not_required",
+        }
+
     chunks = retrieve(
         query,
         top_k=top_k,

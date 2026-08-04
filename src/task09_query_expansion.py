@@ -25,9 +25,18 @@ def _latest_user_question(messages: Sequence[dict]) -> str:
 
 def needs_rewrite(query: str) -> bool:
     """Return whether *query* looks like a context-dependent follow-up."""
+    try:
+        from src.task10_generation import is_out_of_scope, is_small_talk
+        if is_small_talk(query) or is_out_of_scope(query):
+            return False
+    except ImportError:
+        pass
+
     normalized = re.sub(r"\s+", " ", query.lower()).strip()
     words = normalized.split()
-    return len(words) <= 9 or any(marker in normalized for marker in FOLLOW_UP_MARKERS)
+    return any(marker in normalized for marker in FOLLOW_UP_MARKERS) or (
+        len(words) <= 9 and not any(w in normalized for w in ("chán", "buồn", "nản", "mệt", "haiz", "chào", "hi", "hello"))
+    )
 
 
 def rewrite_query(query: str, messages: Sequence[dict] | None = None) -> str:

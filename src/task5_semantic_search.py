@@ -1,64 +1,76 @@
 """
 Task 5 — Semantic Search Module.
-
-Viết module tìm kiếm ngữ nghĩa (dense retrieval) trên vector store.
-
-Yêu cầu:
-    - Input: query string + top_k
-    - Output: danh sách chunks có score, sorted descending
-    - Phải tương thích với embedding model và vector store ở Task 4
 """
+
+from pathlib import Path
+import chromadb
+from sentence_transformers import SentenceTransformer
+
+CHROMA_DIR = Path(__file__).parent.parent / "chroma_db"
+EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+COLLECTION_NAME = "ecommerce_support_docs"
+
+_MODEL = None
+_COLLECTION = None
+
+
+def get_model():
+    global _MODEL
+    if _MODEL is None:
+        _MODEL = SentenceTransformer(EMBEDDING_MODEL)
+    return _MODEL
+
+
+def get_collection():
+    global _COLLECTION
+    if _COLLECTION is None:
+        CHROMA_DIR.mkdir(parents=True, exist_ok=True)
+        client = chromadb.PersistentClient(path=str(CHROMA_DIR))
+        _COLLECTION = client.get_or_create_collection(
+            name=COLLECTION_NAME,
+            metadata={"hnsw:space": "cosine"},
+        )
+    return _COLLECTION
 
 
 def semantic_search(query: str, top_k: int = 10) -> list[dict]:
-    """
-    Tìm kiếm ngữ nghĩa sử dụng vector similarity.
+    """Tìm kiếm ngữ nghĩa sử dụng vector similarity."""
+    model = get_model()
+    collection = get_collection()
 
-    Args:
-        query: Câu truy vấn
-        top_k: Số lượng kết quả tối đa
+    count = collection.count()
+    if count == 0:
+        return []
 
-    Returns:
-        List of {
-            'content': str,      # Nội dung chunk
-            'score': float,      # Cosine similarity score
-            'metadata': dict     # source, doc_type, chunk_index
-        }
-        Sorted by score descending.
-    """
-    # TODO: Implement semantic search
-    #
-    # Bước 1: Embed query bằng cùng model ở Task 4
-    # Bước 2: Query vector store (cosine similarity)
-    # Bước 3: Return top_k results
-    #
-    # Ví dụ với ChromaDB:
-    # from .task4_chunking_indexing import get_collection, get_embedding_model
-    #
-    # model = get_embedding_model()
-    # query_vector = model.encode(query).tolist()
-    #
-    # collection = get_collection()
-    # results = collection.query(
-    #     query_embeddings=[query_vector],
-    #     n_results=top_k,
-    #     include=["documents", "metadatas", "distances"],
-    # )
-    #
-    # output = []
-    # for doc, meta, dist in zip(
-    #     results["documents"][0], results["metadatas"][0], results["distances"][0]
-    # ):
-    #     score = max(0.0, 1.0 - dist)  # cosine distance → similarity
-    #     output.append({"content": doc, "score": round(score, 4), "metadata": meta})
-    #
-    # output.sort(key=lambda x: x["score"], reverse=True)
-    # return output[:top_k]
-    raise NotImplementedError("Implement semantic_search")
+    query_vector = model.encode([query])[0].tolist()
+    n_results = min(top_k, count)
+
+    results = collection.query(
+        query_embeddings=[query_vector],
+        n_results=n_results,
+        include=["documents", "metadatas", "distances"],
+    )
+
+    output = []
+    if results and results.get("documents") and results["documents"][0]:
+        docs = results["documents"][0]
+        metas = results["metadatas"][0]
+        dists = results["distances"][0]
+
+        for doc, meta, dist in zip(docs, metas, dists):
+            score = max(0.0, 1.0 - dist) if dist is not None else 0.5
+            output.append({
+                "content": doc,
+                "score": round(float(score), 4),
+                "metadata": meta or {}
+            })
+
+    output.sort(key=lambda x: x["score"], reverse=True)
+    return output[:top_k]
 
 
 if __name__ == "__main__":
-    # Test
     results = semantic_search("quy định trả hàng hoàn tiền shopee", top_k=5)
     for r in results:
         print(f"[{r['score']:.3f}] {r['content'][:100]}...")
+

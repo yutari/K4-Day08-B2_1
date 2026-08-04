@@ -1,17 +1,82 @@
 [
   {
     "question": "Người mua có thể yêu cầu trả hàng/hoàn tiền trong thời hạn bao lâu sau khi nhận hàng?",
-    "expected_answer": "Trong vòng 15 ngày kể từ khi giao hàng thành công (24 giờ đối với thực phẩm tươi sống/đông lạnh).",
-    "expected_context": "Trang Returns and Refunds Policy, mục Return/Refund Eligibility"
+    "expected_answer": "Đối với Shopee Mall là 15 ngày, shop thường từ 3 đến 7 ngày kể từ khi giao hàng thành công (24 giờ đối với thực phẩm tươi sống/đông lạnh).",
+    "expected_context": "Hướng dẫn và Quy định Trả hàng / Hoàn tiền cho Người mua"
   },
   {
     "question": "Shopee hỗ trợ những phương thức thanh toán nào?",
-    "expected_answer": "ShopeePay Wallet, thẻ tín dụng/ghi nợ, trả góp qua thẻ, QR Code, chuyển khoản qua app ngân hàng, thẻ NAPAS, Apple Pay, Google Pay, và COD.",
-    "expected_context": "Trang Payment Methods Overview"
+    "expected_answer": "ShopeePay Wallet, thẻ tín dụng/ghi nợ (Visa, Mastercard, JCB, Napas), COD, chuyển khoản ngân hàng qua QR Code, và trả góp 0%.",
+    "expected_context": "Các phương thức thanh toán được hỗ trợ trên sàn Thương mại Điện tử"
   },
   {
     "question": "Người bán không được đăng bán những sản phẩm nào?",
-    "expected_answer": "Hàng giả/nhái, sản phẩm bất hợp pháp, vi phạm sở hữu trí tuệ, và các mặt hàng nằm trong danh sách cấm của sàn.",
-    "expected_context": "Trang Product Listing Regulations, mục Prohibited Content"
+    "expected_answer": "Thuốc chữa bệnh, ma túy, vũ khí, hàng giả/nhái, vi phạm sở hữu trí tuệ, động vật hoang dã và thực phẩm chưa qua kiểm định.",
+    "expected_context": "Chính sách và Quy định Đăng bán Sản phẩm dành cho Người bán"
+  },
+  {
+    "question": "Bằng chứng bắt buộc cần cung cấp khi gửi yêu cầu Trả hàng / Hoàn tiền là gì?",
+    "expected_answer": "Video clip quay quá trình mở gói hàng (unboxing) còn nguyên tem niêm phong và hình ảnh chụp rõ nét tem vận chuyển kèm vết lỗi sản phẩm.",
+    "expected_context": "Hướng dẫn và Quy định Trả hàng / Hoàn tiền cho Người mua"
+  },
+  {
+    "question": "Các phương thức vận chuyển đơn hàng được hỗ trợ bao gồm những gì?",
+    "expected_answer": "Giao hàng Hỏa tốc (1-2 giờ), Giao hàng Nhanh (1-3 ngày làm việc) và Giao hàng Tiết kiệm cho đơn cồng kềnh.",
+    "expected_context": "Chính sách Vận chuyển và Theo dõi Đơn hàng Hỗ trợ Khách hàng"
+  },
+  {
+    "question": "Giá trị quy đổi của Xu thưởng khi mua sắm được tính như thế nào?",
+    "expected_answer": "1 Xu thưởng quy đổi tương đương 1 VNĐ khi giảm giá trực tiếp vào tổng đơn hàng.",
+    "expected_context": "Hướng dẫn Tích lũy và Sử dụng Xu Thưởng"
+  },
+  {
+    "question": "Hạn sử dụng của Xu thưởng tích lũy là bao lâu?",
+    "expected_answer": "Xu thưởng có hạn sử dụng đến ngày cuối cùng của tháng thứ 3 kể từ khi nhận xu.",
+    "expected_context": "Hướng dẫn Tích lũy và Sử dụng Xu Thưởng"
+  },
+  {
+    "question": "Người bán vi phạm quy định đăng bán sản phẩm cấm sẽ bị xử lý như thế nào?",
+    "expected_answer": "Khóa hoặc xóa sản phẩm vi phạm, tăng điểm phạt Sao Quả Tạ hoặc khóa tài khoản vĩnh viễn nếu vi phạm nghiêm trọng.",
+    "expected_context": "Chính sách và Quy định Đăng bán Sản phẩm dành cho Người bán"
+  },
+  {
+    "question": "Thời gian nhận hàng khi sử dụng phương thức Giao hàng Hỏa tốc là bao lâu?",
+    "expected_answer": "Trong vòng 1 đến 2 giờ kể từ khi người bán giao hàng cho đơn vị vận chuyển.",
+    "expected_context": "Chính sách Vận chuyển và Theo dõi Đơn hàng Hỗ trợ Khách hàng"
+  },
+  {
+    "question": "Thẻ trả góp 0% áp dụng cho các đơn hàng có giá trị tối thiểu từ bao nhiêu?",
+    "expected_answer": "Áp dụng cho các đơn hàng đủ điều kiện có giá trị từ 3.000.000 VNĐ trở lên qua thẻ tín dụng.",
+    "expected_context": "Các phương thức thanh toán được hỗ trợ trên sàn Thương mại Điện tử"
+  },
+  {
+    "question": "Làm thế nào để người mua xem vị trí thời gian thực của đơn hàng?",
+    "expected_answer": "Vào mục Đơn hàng của tôi và chọn Thông tin vận chuyển để theo dõi vị trí mã vận đơn.",
+    "expected_context": "Chính sách Vận chuyển và Theo dõi Đơn hàng Hỗ trợ Khách hàng"
+  },
+  {
+    "question": "Lưu ý an toàn quan trọng khi thực hiện thanh toán trực tuyến là gì?",
+    "expected_answer": "Không chia sẻ mã OTP hoặc mật khẩu ví và chỉ giao dịch trực tiếp trên ứng dụng hoặc website chính thức.",
+    "expected_context": "Các phương thức thanh toán được hỗ trợ trên sàn Thương mại Điện tử"
+  },
+  {
+    "question": "Những lý do hợp lệ nào cho phép người mua gửi yêu cầu hoàn tiền?",
+    "expected_answer": "Sản phẩm bị lỗi/hư hỏng do vận chuyển, giao sai mẫu mã/kích thước/thiếu phụ kiện, hoặc là hàng giả/nhái.",
+    "expected_context": "Hướng dẫn và Quy định Trả hàng / Hoàn tiền cho Người mua"
+  },
+  {
+    "question": "Đơn vị vận chuyển hợp tác cùng sàn TMĐT gồm những đơn vị nào?",
+    "expected_answer": "SPX Express, Giao Hàng Nhanh (GHN), Giao Hàng Tiết Kiệm (GHTK), Viettel Post, Ninja Van.",
+    "expected_context": "Chính sách Vận chuyển và Theo dõi Đơn hàng Hỗ trợ Khách hàng"
+  },
+  {
+    "question": "Cách kích hoạt giảm giá Xu thưởng tại trang thanh toán như thế nào?",
+    "expected_answer": "Tại trang Thanh toán, gạt nút Sử dụng Xu để trừ tiền trực tiếp vào tổng giá trị đơn hàng.",
+    "expected_context": "Hướng dẫn Tích lũy và Sử dụng Xu Thưởng"
+  },
+  {
+    "question": "Điều kiện yêu cầu đổi trả đối với sản phẩm thực phẩm tươi sống là gì?",
+    "expected_answer": "Phải gửi yêu cầu trả hàng/hoàn tiền trong vòng 24 giờ kể từ khi nhận hàng thành công.",
+    "expected_context": "Hướng dẫn và Quy định Trả hàng / Hoàn tiền cho Người mua"
   }
 ]

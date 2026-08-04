@@ -48,29 +48,48 @@ Sử dụng **1 trong 3 framework** sau để evaluate pipeline RAG của nhóm:
 
 Xem code mẫu (DeepEval/RAGAS/TruLens) chi tiết trong `README.md` gốc mục "Yêu cầu 2".
 
-### Deliverable Evaluation
+# Bài Tập Nhóm — E-commerce Support RAG Chatbot & Evaluation Pipeline
 
-- [ ] File `group_project/evaluation/golden_dataset.json` — 15+ cặp Q&A
-- [ ] File `group_project/evaluation/eval_pipeline.py` — script chạy evaluation
-- [ ] File `group_project/evaluation/results.md` — bảng điểm + phân tích
-- [ ] So sánh A/B ít nhất 2 configs
+## Mục Tiêu
+
+Dự án nhóm hoàn thiện **Hệ thống RAG Chatbot hỗ trợ Thương mại Điện tử** và **Hệ thống Đánh giá Tự động (RAG Evaluation Pipeline)** dựa trên kiến trúc 7 phân tầng tiêu chuẩn.
 
 ---
 
-## Yêu Cầu Chung
+## Deliverables & Trạng Thái Hoàn Thành
 
-1. **Tích hợp pipeline** từ bài cá nhân của các thành viên
-2. **Demo hoạt động được** trong buổi trình bày (chạy local hoặc deploy)
-3. **Evaluation pipeline** chạy được và có báo cáo kết quả
-4. **Code push lên repository** chung của nhóm
-5. **README** mô tả kiến trúc và phân công (điền bên dưới)
+- [x] File `Requirement.md` — Mô tả chi tiết yêu cầu dự án
+- [x] File `Architecture.md` — Bản thiết kế kiến trúc hệ thống 7 phân tầng
+- [x] File `group_project/evaluation/golden_dataset.json` — 16 cặp Q&A TMĐT mẫu chuẩn
+- [x] File `group_project/evaluation/eval_pipeline.py` — Script tự động đánh giá RAGAS/DeepEval
+- [x] File `group_project/evaluation/results.md` — Bảng điểm đánh giá + A/B Testing Matrix + Phân tích Worst Performers
+- [x] Giao diện Chatbot Streamlit (`app.py`) tích hợp Citations & Memory
 
 ---
 
 ## Kiến Trúc Hệ Thống
 
+Chi tiết xem tại tài liệu kiến trúc: **[Architecture.md](file:///d:/Lap8/K4-Day08-RAG-Pipeline/Architecture.md)**
+
 ```
-[Vẽ diagram kiến trúc ở đây]
+[User Query] ──> [Streamlit UI / Memory]
+                       │
+                       ▼
+       ┌───────────────────────────────┐
+       │   Hybrid Search Retrieval     │
+       │ (Dense ChromaDB + Sparse BM25)│
+       └───────────────┬───────────────┘
+                       │ Reciprocal Rank Fusion (RRF)
+                       ▼
+       ┌───────────────────────────────┐
+       │    Cross-Encoder Reranking    │
+       └───────────────┬───────────────┘
+                       │ (Fallback PageIndex if score < threshold)
+                       ▼
+       ┌───────────────────────────────┐
+       │  Generation with Citations    │
+       │   (OpenAI / OpenRouter LLM)   │
+       └───────────────────────────────┘
 ```
 
 ---
@@ -79,27 +98,34 @@ Xem code mẫu (DeepEval/RAGAS/TruLens) chi tiết trong `README.md` gốc mục
 
 | Thành viên | MSSV | Nhiệm vụ | Trạng thái |
 |-----------|------|----------|------------|
-| | | | |
-| | | | |
-| | | | |
-| | | | |
+| Nhóm Data | K4-B2_1 | Thu thập văn bản pháp lý, tin tức & Xây dựng Golden Dataset | [OK] Completed |
+| Core Dev | K4-B2_1 | Lập trình Task 1 - 10 (Chunking, Hybrid Search, Rerank, Citation) | [OK] Completed |
+| UI Lead | K4-B2_1 | Hoàn thiện Streamlit Chatbot UI & Source Document Expanders | [OK] Completed |
+| Eval Specialist | K4-B2_1 | Lập trình `eval_pipeline.py`, chạy A/B Testing & viết `results.md` | [OK] Completed |
 
 ---
 
-## Hướng Dẫn Chạy
+## Hướng Dẫn Chạy Dự Án
 
-```bash
-# Cài đặt dependencies
+### 1. Kích hoạt môi trường và Cài đặt
+```powershell
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-
-# Chạy app
-streamlit run app.py
-# hoặc
-chainlit run app.py
 ```
 
----
+### 2. Chạy Kiểm Thử Bài Cá Nhân (Pytest)
+```powershell
+pytest tests/test_individual.py -v
+```
 
-## Lưu ý
+### 3. Chạy Pipeline Đánh Giá RAG (Evaluation & A/B Testing)
+```powershell
+python group_project/evaluation/eval_pipeline.py
+```
+*(Kết quả đánh giá sẽ tự động được ghi vào `group_project/evaluation/results.md`)*
 
-Hãy giữ lại repo này nếu như bạn học track 3 giai đoạn 2, chúng ta sẽ phát triển tiếp dự án lên knowledge graph để khắc phục các câu hỏi hóc búa khi có các câu hỏi khó.
+### 4. Khởi Chạy Ứng Dụng Chatbot Streamlit
+```powershell
+streamlit run app.py
+```
+

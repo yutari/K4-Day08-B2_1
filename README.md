@@ -17,6 +17,29 @@ pinned: false
 
 ---
 
+## Chạy ứng dụng
+
+Yêu cầu Python 3.10 hoặc 3.11 (khuyến nghị; Python 3.12 có thể chưa tương thích với một số bản `torch`/`crawl4ai`). Tại PowerShell ở thư mục dự án:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+Copy-Item .env.example .env
+python -m src.task3_convert_markdown
+python -m src.task4_chunking_indexing
+streamlit run app.py
+```
+
+`task3` dùng MarkItDown để chuyển PDF/DOCX; `task4` phải được chạy lại mỗi khi tài liệu trong `data/standardized/` thay đổi. Nếu không cấu hình khóa LLM trong `.env`, chatbot vẫn chạy ở chế độ extractive, trả các đoạn bằng chứng cùng citation. Tùy chọn chạy benchmark:
+
+```powershell
+python group_project/evaluation/eval_pipeline.py
+```
+
+---
+
 ## Mục Tiêu
 
 Xây dựng một RAG pipeline thực tế, end-to-end, từ thu thập dữ liệu chính sách thương mại điện tử và hỗ trợ khách hàng → xử lý → indexing → retrieval (hybrid + vectorless fallback) → generation có citation.

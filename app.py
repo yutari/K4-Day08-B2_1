@@ -206,7 +206,7 @@ st.markdown("""
 
 def render_source_card(i: int, src: dict, key_prefix: str = "src"):
     meta = src.get("metadata", {})
-    source_name = meta.get("source", "Chính sách")
+    source_name = meta.get("title") or meta.get("source", "Chính sách")
     doc_type = meta.get("type", "policy")
     score = src.get("score", 0.0)
     ret_src = src.get("source", "hybrid")
@@ -258,6 +258,28 @@ if "messages" not in st.session_state:
 if "pending_query" not in st.session_state:
     st.session_state.pending_query = None
 
+
+def append_message(message: dict) -> None:
+    """Keep exactly the latest ten conversation turns (20 chat messages)."""
+    st.session_state.messages.append(message)
+    st.session_state.messages = st.session_state.messages[-20:]
+
+
+@st.cache_resource(show_spinner=False)
+def warm_retrieval_resources() -> bool:
+    """Cache heavyweight local models and the Chroma client across Streamlit reruns."""
+    try:
+        from src.task5_semantic_search import get_collection, get_model
+        from src.task6_lexical_search import _get_corpus_and_index
+
+        get_model()
+        get_collection()
+        _get_corpus_and_index()
+        return True
+    except Exception:
+        # Retrieval's structural fallback remains usable if a model download fails.
+        return False
+
 # =============================================================================
 # SIDEBAR CONTROLS
 # =============================================================================
@@ -269,8 +291,9 @@ with st.sidebar:
 
     st.markdown("### ⚙️ Retrieval & LLM Config")
     top_k = st.slider("Số lượng Chunks (top_k)", min_value=1, max_value=10, value=5)
-    score_threshold = st.slider("Ngưỡng Score Threshold", min_value=0.10, max_value=0.80, value=0.25, step=0.05)
-    use_rerank = st.toggle("Sử dụng Reranking (Cross-Encoder / RRF)", value=True)
+    score_threshold = st.slider("Ngưỡng Score Threshold", min_value=0.10, max_value=0.80, value=0.35, step=0.05)
+    dense_weight = st.slider("Ưu tiên Semantic Search (α)", min_value=0.0, max_value=1.0, value=0.5, step=0.05)
+    use_rerank = st.toggle("Sử dụng Cross-Encoder Reranking", value=True)
     
     st.divider()
 
@@ -305,7 +328,7 @@ with st.sidebar:
 
     st.divider()
     st.markdown("##### 📌 System Architecture")
-    st.caption("• Dense Vector: `ChromaDB` (all-MiniLM-L6-v2)\n• Sparse Lexical: `BM25Okapi`\n• Fusion: `Reciprocal Rank Fusion (RRF)`\n• Fallback: `PageIndex Structural Search`\n• Generation: `OpenAI / OpenRouter API`")
+    st.caption("• Dense Vector: `ChromaDB` (all-MiniLM-L6-v2)\n• Sparse Lexical: `BM25Okapi`\n• Fusion: Weighted RRF\n• Rerank: Cross-Encoder\n• Fallback: Structural PageIndex\n• Generation: Gemini / OpenRouter / OpenAI")
 
 # =============================================================================
 # MAIN INTERFACE WITH TABS
@@ -347,9 +370,12 @@ with tab1:
 
     if query:
         st.session_state.pending_query = None
+        from src.task09_query_expansion import rewrite_query
+
+        rewritten_query = rewrite_query(query, st.session_state.messages)
 
         # Display User Message
-        st.session_state.messages.append({"role": "user", "content": query})
+        append_message({"role": "user", "content": query})
         with st.chat_message("user"):
             st.markdown(query)
 
@@ -358,10 +384,17 @@ with tab1:
             with st.spinner("🔍 Đang tìm kiếm tài liệu Hybrid Search (BM25 + Dense) và tổng hợp câu trả lời..."):
                 try:
                     from src.task10_generation import generate_with_citation
-                    from src.task9_retrieval_pipeline import retrieve
 
-                    # Execute pipeline
-                    res = generate_with_citation(query, top_k=top_k)
+                    warm_retrieval_resources()
+                    # The displayed question is preserved; the expanded query is only retrieval context.
+                    res = generate_with_citation(
+                        rewritten_query,
+                        top_k=top_k,
+                        history=st.session_state.messages[:-1],
+                        score_threshold=score_threshold,
+                        use_reranking=use_rerank,
+                        dense_weight=dense_weight,
+                    )
                     answer = res.get("answer", "Không thể tạo câu trả lời.")
                     sources = res.get("sources", [])
                     ret_source = res.get("retrieval_source", "hybrid")
@@ -372,13 +405,15 @@ with tab1:
                     ret_source = "error"
 
                 st.markdown(answer)
+                if rewritten_query != query:
+                    st.caption(f"Truy vấn đã được hiểu theo ngữ cảnh: {rewritten_query}")
 
                 if sources:
                     with st.expander(f"📚 Nguồn tài liệu tham khảo ({len(sources)} chunks) — Via `{ret_source}`"):
                         for i, src in enumerate(sources, 1):
                             render_source_card(i, src, key_prefix=f"live_{len(st.session_state.messages)}")
 
-        st.session_state.messages.append({
+        append_message({
             "role": "assistant",
             "content": answer,
             "sources": sources,
@@ -393,33 +428,12 @@ with tab2:
     st.markdown("### 📊 Báo Cáo Đánh Giá RAG Triad Metrics & So Sánh A/B Testing")
     st.caption("Kết quả đo lường tự động trên Golden Dataset gồm 16 cặp Q&A TMĐT chuẩn")
 
-    # Stat Cards
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.markdown("<div class='metric-card'><div class='metric-val'>89.94%</div><div class='metric-lbl'>Faithfulness (Trung Thực)</div></div>", unsafe_allow_html=True)
-    with c2:
-        st.markdown("<div class='metric-card'><div class='metric-val'>87.93%</div><div class='metric-lbl'>Answer Relevance (Liên Quan)</div></div>", unsafe_allow_html=True)
-    with c3:
-        st.markdown("<div class='metric-card'><div class='metric-val'>83.67%</div><div class='metric-lbl'>Context Recall (Độ Phủ)</div></div>", unsafe_allow_html=True)
-    with c4:
-        st.markdown("<div class='metric-card'><div class='metric-val'>82.72%</div><div class='metric-lbl'>Context Precision (Chính Xác)</div></div>", unsafe_allow_html=True)
-
-    st.divider()
-
-    st.markdown("#### ⚖️ Bảng So Sánh Hiệu Năng A/B Testing Matrix")
-    ab_data = {
-        "Metric Đánh Giá": [
-            "Faithfulness (Độ trung thực)",
-            "Answer Relevance (Độ liên quan)",
-            "Context Recall (Độ phủ Context)",
-            "Context Precision (Độ chính xác)",
-            "Điểm Trung Bình Tổng Thể"
-        ],
-        "Config A (Baseline: Dense Only)": ["0.8994", "0.8404", "0.8367", "0.8272", "0.8509"],
-        "Config B (Advanced: Hybrid RRF + Rerank)": ["0.8799", "0.8761", "0.8202", "0.8240", "0.8500"],
-        "Cải Thiện (Δ)": ["-1.95%", "+3.57%", "-1.65%", "-0.32%", "-0.09%"]
-    }
-    st.table(ab_data)
+    results_path = PROJECT_ROOT / "group_project" / "evaluation" / "results.md"
+    if results_path.exists():
+        st.caption("Báo cáo dưới đây là kết quả lần chạy gần nhất, không phải số liệu hard-code.")
+        st.markdown(results_path.read_text(encoding="utf-8"))
+    else:
+        st.info("Chưa có báo cáo. Chạy `python group_project/evaluation/eval_pipeline.py` sau khi index dữ liệu.")
 
     st.divider()
 
@@ -446,7 +460,7 @@ with tab3:
     std_dir = PROJECT_ROOT / "data" / "standardized"
     if std_dir.exists():
         md_files = list(std_dir.rglob("*.md"))
-        st.info(f"Tổng số văn bản trong kho dữ liệu: **{len(md_files)} tệp tin Markdown** (Chứa 375 Chunks)")
+        st.info(f"Tổng số văn bản trong kho dữ liệu: **{len(md_files)} tệp tin Markdown**")
 
         selected_file = st.selectbox("Chọn văn bản để xem nội dung:", options=md_files, format_func=lambda x: str(x.relative_to(std_dir)))
         if selected_file:
@@ -477,7 +491,14 @@ with tab4:
     if st.button("🚀 Chạy Retrieval Pipeline Test"):
         from src.task9_retrieval_pipeline import retrieve
         with st.spinner("Đang chạy retrieval..."):
-            results = retrieve(test_q, top_k=top_k, score_threshold=score_threshold)
+            warm_retrieval_resources()
+            results = retrieve(
+                test_q,
+                top_k=top_k,
+                score_threshold=score_threshold,
+                use_reranking=use_rerank,
+                dense_weight=dense_weight,
+            )
             st.success(f"Lấy về {len(results)} kết quả (Source: `{results[0].get('source','unknown') if results else 'None'}`)")
             for i, r in enumerate(results, 1):
                 render_source_card(i, r, key_prefix="fallback_test")

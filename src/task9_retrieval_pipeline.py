@@ -1,22 +1,28 @@
-"""
-Task 9 — Retrieval Pipeline Hoàn Chỉnh.
-"""
+"""Hybrid retrieval: parallel Dense/BM25, weighted RRF, reranking and fallback."""
 
-try:
-    from src.task5_semantic_search import semantic_search
-    from src.task6_lexical_search import lexical_search
-    from src.task7_reranking import rerank, rerank_rrf
-    from src.task8_pageindex_vectorless import pageindex_search
-except ImportError:
-    from .task5_semantic_search import semantic_search
-    from .task6_lexical_search import lexical_search
-    from .task7_reranking import rerank, rerank_rrf
-    from .task8_pageindex_vectorless import pageindex_search
+from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 
-SCORE_THRESHOLD = 0.25
+from src.task5_semantic_search import semantic_search
+from src.task6_lexical_search import lexical_search
+from src.task7_reranking import fuse_rrf, rerank_cross_encoder
+from src.task8_pageindex_vectorless import pageindex_search
+
+DENSE_TOP_N = 20
+SPARSE_TOP_N = 20
 DEFAULT_TOP_K = 5
-RERANK_METHOD = "rrf"
+SCORE_THRESHOLD = 0.35
+
+
+def _annotate(results: list[dict], key: str) -> list[dict]:
+    return [{**item, key: item["score"]} for item in results]
+
+
+def _confidence(candidates: list[dict]) -> float:
+    """Mean original dense similarity of the top candidates, in the 0–1 range."""
+    dense_scores = [float(item["dense_score"]) for item in candidates if "dense_score" in item]
+    return round(sum(dense_scores) / len(dense_scores), 4) if dense_scores else 0.0
 
 
 def retrieve(
@@ -24,49 +30,41 @@ def retrieve(
     top_k: int = DEFAULT_TOP_K,
     score_threshold: float = SCORE_THRESHOLD,
     use_reranking: bool = True,
+    dense_weight: float = 0.5,
 ) -> list[dict]:
-    """Retrieval pipeline hoàn chỉnh với fallback logic."""
-    dense_results = semantic_search(query, top_k=top_k * 2)
-    sparse_results = lexical_search(query, top_k=top_k * 2)
+    """Return the best cited chunks for a query.
 
-    merged = rerank_rrf([dense_results, sparse_results], top_k=top_k * 2)
-    for item in merged:
-        item["source"] = "hybrid"
+    Dense and sparse retrieval execute concurrently.  The confidence gate uses
+    original dense cosine similarity, never the much smaller RRF score.
+    """
+    if not query.strip() or top_k < 1:
+        return []
+    dense_weight = min(1.0, max(0.0, dense_weight))
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        dense_future = executor.submit(semantic_search, query, DENSE_TOP_N)
+        sparse_future = executor.submit(lexical_search, query, SPARSE_TOP_N)
+        try:
+            dense_results = _annotate(dense_future.result(), "dense_score")
+        except Exception:
+            dense_results = []
+        try:
+            sparse_results = _annotate(sparse_future.result(), "sparse_score")
+        except Exception:
+            sparse_results = []
 
-    if use_reranking and merged:
-        final_results = rerank(query, merged, top_k=top_k, method=RERANK_METHOD)
-    else:
-        final_results = merged[:top_k]
-
-    for item in final_results:
-        if "source" not in item:
-            item["source"] = "hybrid"
-
-    best_score = dense_results[0]["score"] if dense_results else 0.0
-    if best_score < score_threshold or not final_results:
+    fused = fuse_rrf(
+        [dense_results, sparse_results],
+        weights=[dense_weight, 1.0 - dense_weight],
+        top_k=max(DENSE_TOP_N, SPARSE_TOP_N),
+    )
+    candidates = rerank_cross_encoder(query, fused, top_k=top_k) if use_reranking else fused[:top_k]
+    confidence = _confidence(candidates)
+    if not candidates or confidence < score_threshold:
         fallback = pageindex_search(query, top_k=top_k)
         if fallback:
-            for f in fallback:
-                f["source"] = "pageindex"
             return fallback
 
-    return final_results[:top_k]
-
-
-if __name__ == "__main__":
-    test_queries = [
-        "What payment methods does Shopee support?",
-        "How do I request a return or refund?",
-        "What evidence do I need for a refund request?",
-        "xyzabc123nonsense",
-    ]
-
-    for q in test_queries:
-        print(f"\nQuery: {q}")
-        print("-" * 60)
-        results = retrieve(q, top_k=3)
-        for i, r in enumerate(results, 1):
-            text_preview = r['content'][:80].encode('ascii', errors='ignore').decode('ascii')
-            print(f"  {i}. [{r['score']:.3f}] [{r.get('source', 'hybrid')}] {text_preview}...")
-
-
+    for item in candidates:
+        item["source"] = "hybrid"
+        item["metadata"] = {**item.get("metadata", {}), "confidence": confidence}
+    return candidates

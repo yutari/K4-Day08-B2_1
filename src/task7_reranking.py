@@ -1,11 +1,8 @@
-"""
-Task 7 — Reranking Module.
-"""
+"""Rank fusion and Cross-Encoder reranking for hybrid retrieval."""
 
-from typing import Optional
-# pyrefly: ignore [missing-import]
-import numpy as np  
+from __future__ import annotations
 
+from collections.abc import Sequence
 
 _CROSS_ENCODER_MODEL = None
 
@@ -13,120 +10,65 @@ _CROSS_ENCODER_MODEL = None
 def get_cross_encoder():
     global _CROSS_ENCODER_MODEL
     if _CROSS_ENCODER_MODEL is None:
-        # pyrefly: ignore [missing-import]
         from sentence_transformers import CrossEncoder
+
         _CROSS_ENCODER_MODEL = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
     return _CROSS_ENCODER_MODEL
 
 
-def rerank_cross_encoder(
-    query: str, candidates: list[dict], top_k: int = 5
+def fuse_rrf(
+    ranked_lists: Sequence[list[dict]],
+    *,
+    weights: Sequence[float] | None = None,
+    top_k: int = 20,
+    k: int = 60,
 ) -> list[dict]:
-    """Rerank candidates sử dụng cross-encoder model hoặc similarity re-scoring."""
+    """Fuse rank lists with weighted Reciprocal Rank Fusion.
+
+    Scores used for fallback remain in ``dense_score``; the RRF score is only
+    used to form a stable candidate order across heterogeneous retrievers.
+    """
+    weights = weights or [1.0] * len(ranked_lists)
+    fusion_scores: dict[str, float] = {}
+    candidates: dict[str, dict] = {}
+    for ranked_list, weight in zip(ranked_lists, weights):
+        for rank, item in enumerate(ranked_list, start=1):
+            key = f"{item.get('metadata', {}).get('relative_path', item.get('metadata', {}).get('source', ''))}::{item['content']}"
+            fusion_scores[key] = fusion_scores.get(key, 0.0) + float(weight) / (k + rank)
+            merged = candidates.setdefault(key, {**item})
+            if "dense_score" in item:
+                merged["dense_score"] = max(float(item["dense_score"]), float(merged.get("dense_score", 0.0)))
+            if "sparse_score" in item:
+                merged["sparse_score"] = max(float(item["sparse_score"]), float(merged.get("sparse_score", 0.0)))
+    output: list[dict] = []
+    for key, rrf_score in sorted(fusion_scores.items(), key=lambda pair: pair[1], reverse=True)[:top_k]:
+        item = {**candidates[key], "rrf_score": round(rrf_score, 6), "score": round(rrf_score, 6)}
+        output.append(item)
+    return output
+
+
+def rerank_cross_encoder(query: str, candidates: list[dict], top_k: int = 5) -> list[dict]:
+    """Rescore fused candidates with a Cross-Encoder, with deterministic fallback."""
     if not candidates:
         return []
     try:
-        model = get_cross_encoder()
-        pairs = [[query, c["content"]] for c in candidates]
-        scores = model.predict(pairs)
-        for c, s in zip(candidates, scores):
-            c["score"] = round(float(s), 4)
-        sorted_candidates = sorted(candidates, key=lambda x: x["score"], reverse=True)
-        return sorted_candidates[:top_k]
+        scores = get_cross_encoder().predict([(query, item["content"]) for item in candidates])
+        ranked = []
+        for item, score in zip(candidates, scores):
+            updated = {**item, "cross_encoder_score": round(float(score), 4), "score": round(float(score), 4)}
+            ranked.append(updated)
+        return sorted(ranked, key=lambda item: item["score"], reverse=True)[:top_k]
     except Exception:
-        sorted_candidates = sorted(candidates, key=lambda x: x.get("score", 0), reverse=True)
-        return sorted_candidates[:top_k]
+        # A model download failure must not make the chatbot unavailable.
+        return sorted(candidates, key=lambda item: item.get("rrf_score", item.get("score", 0.0)), reverse=True)[:top_k]
 
 
-
-def rerank_mmr(
-    query_embedding: list[float],
-    candidates: list[dict],
-    top_k: int = 5,
-    lambda_param: float = 0.7,
-) -> list[dict]:
-    """Maximal Marginal Relevance — chọn candidates vừa relevant vừa diverse."""
-    if not candidates:
-        return []
-
-    selected = []
-    remaining = list(range(len(candidates)))
-
-    for _ in range(min(top_k, len(candidates))):
-        best_idx = None
-        best_score = float('-inf')
-
-        for idx in remaining:
-            rel = candidates[idx].get("score", 0.5)
-            max_sim_to_selected = 0.0
-            for sel_idx in selected:
-                max_sim_to_selected = max(max_sim_to_selected, 0.1)
-
-            mmr_score = lambda_param * rel - (1 - lambda_param) * max_sim_to_selected
-
-            if mmr_score > best_score:
-                best_score = mmr_score
-                best_idx = idx
-
-        if best_idx is not None:
-            selected.append(best_idx)
-            remaining.remove(best_idx)
-
-    return [candidates[i] for i in selected]
+def rerank_rrf(ranked_lists: list[list[dict]], top_k: int = 5, k: int = 60) -> list[dict]:
+    """Backward-compatible unweighted RRF helper."""
+    return fuse_rrf(ranked_lists, top_k=top_k, k=k)
 
 
-def rerank_rrf(
-    ranked_lists: list[list[dict]], top_k: int = 5, k: int = 60
-) -> list[dict]:
-    """Reciprocal Rank Fusion — gộp kết quả từ nhiều ranker."""
-    rrf_scores = {}
-    content_map = {}
-
-    for ranked_list in ranked_lists:
-        for rank, item in enumerate(ranked_list, 1):
-            key = item["content"]
-            rrf_scores[key] = rrf_scores.get(key, 0.0) + 1.0 / (k + rank)
-            content_map[key] = item
-
-    sorted_items = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
-
-    results = []
-    for content, score in sorted_items[:top_k]:
-        item = content_map[content].copy()
-        item["score"] = round(float(score), 4)
-        results.append(item)
-
-    return results
-
-
-def rerank(
-    query: str,
-    candidates: list[dict],
-    top_k: int = 5,
-    method: str = "rrf",
-) -> list[dict]:
-    """Unified reranking interface."""
-    if not candidates:
-        return []
-
+def rerank(query: str, candidates: list[dict], top_k: int = 5, method: str = "cross_encoder") -> list[dict]:
     if method == "cross_encoder":
         return rerank_cross_encoder(query, candidates, top_k)
-    elif method == "mmr":
-        return rerank_mmr([], candidates, top_k)
-    elif method == "rrf":
-        return rerank_rrf([candidates], top_k)
-    else:
-        sorted_candidates = sorted(candidates, key=lambda x: x.get("score", 0), reverse=True)
-        return sorted_candidates[:top_k]
-
-
-if __name__ == "__main__":
-    dummy_candidates = [
-        {"content": "Chính sách trả hàng và hoàn tiền Shopee trong 15 ngày", "score": 0.8, "metadata": {}},
-        {"content": "Các phương thức thanh toán hỗ trợ trên Shopee Vietnam", "score": 0.6, "metadata": {}},
-        {"content": "Quy định đăng bán sản phẩm dành cho người bán", "score": 0.5, "metadata": {}},
-    ]
-    results = rerank("chính sách trả hàng shopee", dummy_candidates, top_k=2)
-    for r in results:
-        print(f"[{r['score']:.3f}] {r['content']}")
-
+    return sorted(candidates, key=lambda item: item.get("score", 0.0), reverse=True)[:top_k]

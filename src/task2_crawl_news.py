@@ -172,6 +172,7 @@ async def crawl_all():
 
 
 if __name__ == "__main__":
-    save_sample_news()
+    import asyncio
 
+    asyncio.run(crawl_all())
 

@@ -1,68 +1,53 @@
-"""
-Task 6 — Lexical Search Module (BM25).
-"""
+"""BM25 lexical retrieval using a Vietnamese-friendly tokenizer."""
 
-# pyrefly: ignore [missing-import]
-from rank_bm25 import BM25Okapi
-# pyrefly: ignore [missing-import]
+from __future__ import annotations
+
+import re
+
 import numpy as np
+from rank_bm25 import BM25Okapi
 
-try:
-    from src.task4_chunking_indexing import load_documents, chunk_documents
-except ImportError:
-    from .task4_chunking_indexing import load_documents, chunk_documents
+from src.task4_chunking_indexing import chunk_documents, load_documents
 
-
-_CORPUS = None
-_BM25_INDEX = None
+_CORPUS: list[dict] | None = None
+_BM25_INDEX: BM25Okapi | None = None
 
 
-def _get_corpus_and_index():
+def tokenize(text: str) -> list[str]:
+    return re.findall(r"[\wÀ-ỹ]+", text.lower(), flags=re.UNICODE)
+
+
+def invalidate_bm25_cache() -> None:
+    global _CORPUS, _BM25_INDEX
+    _CORPUS, _BM25_INDEX = None, None
+
+
+def _get_corpus_and_index() -> tuple[list[dict], BM25Okapi | None]:
     global _CORPUS, _BM25_INDEX
     if _CORPUS is None or _BM25_INDEX is None:
-        docs = load_documents()
-        _CORPUS = chunk_documents(docs)
-        if not _CORPUS:
-            _CORPUS = [{
-                "content": "Không tìm thấy nội dung văn bản chính sách",
-                "metadata": {"source": "default.md", "type": "news"}
-            }]
-        tokenized_corpus = [doc["content"].lower().split() for doc in _CORPUS]
-        _BM25_INDEX = BM25Okapi(tokenized_corpus)
+        _CORPUS = chunk_documents(load_documents())
+        _BM25_INDEX = BM25Okapi([tokenize(item["content"]) for item in _CORPUS]) if _CORPUS else None
     return _CORPUS, _BM25_INDEX
 
 
-def build_bm25_index(corpus: list[dict]):
-    """Xây dựng BM25 index từ corpus."""
-    tokenized_corpus = [doc["content"].lower().split() for doc in corpus]
-    return BM25Okapi(tokenized_corpus)
+def build_bm25_index(corpus: list[dict]) -> BM25Okapi:
+    return BM25Okapi([tokenize(item["content"]) for item in corpus])
 
 
-def lexical_search(query: str, top_k: int = 10) -> list[dict]:
-    """Tìm kiếm từ khóa sử dụng BM25."""
-    corpus, bm25 = _get_corpus_and_index()
-    if not corpus or not bm25:
+def lexical_search(query: str, top_k: int = 20) -> list[dict]:
+    """Return only positively matching BM25 results, sorted high to low."""
+    if not query.strip() or top_k < 1:
         return []
-
-    tokenized_query = query.lower().split()
-    scores = bm25.get_scores(tokenized_query)
-
-    top_indices = np.argsort(scores)[::-1][:top_k]
-
-    results = []
-    for idx in top_indices:
-        score_val = float(scores[idx])
-        results.append({
-            "content": corpus[idx]["content"],
-            "score": round(score_val if score_val > 0 else 0.01, 4),
-            "metadata": corpus[idx].get("metadata", {})
-        })
-    return results[:top_k]
-
-
-if __name__ == "__main__":
-    results = lexical_search("phương thức thanh toán shopee", top_k=5)
-    for r in results:
-        print(f"[{r['score']:.3f}] {r['content'][:100]}...")
-
-
+    corpus, index = _get_corpus_and_index()
+    if not corpus or index is None:
+        return []
+    scores = index.get_scores(tokenize(query))
+    positive_indices = [int(i) for i in np.argsort(scores)[::-1] if scores[i] > 0]
+    return [
+        {
+            "content": corpus[i]["content"],
+            "score": round(float(scores[i]), 4),
+            "metadata": corpus[i].get("metadata", {}),
+        }
+        for i in positive_indices[:top_k]
+    ]

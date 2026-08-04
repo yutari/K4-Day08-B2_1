@@ -1,77 +1,69 @@
-"""
-Task 8 — PageIndex Vectorless RAG.
+"""Vectorless fallback based on the Markdown document hierarchy.
+
+The local implementation is always available and does not send documents to a
+third party.  It provides the same safe fallback role when PageIndex credentials
+are not configured.
 """
 
-import os
+from __future__ import annotations
+
+import re
 from pathlib import Path
-# pyrefly: ignore [missing-import]
-from dotenv import load_dotenv
 
-load_dotenv()
+from src.task6_lexical_search import tokenize
 
-PAGEINDEX_API_KEY = os.getenv("PAGEINDEX_API_KEY", "")
 STANDARDIZED_DIR = Path(__file__).parent.parent / "data" / "standardized"
 
 
-def upload_documents():
-    """Upload toàn bộ markdown documents lên PageIndex."""
-    if not PAGEINDEX_API_KEY:
-        print("[INFO] PAGEINDEX_API_KEY không tồn tại, bỏ qua upload.")
-        return
-    try:
-        # pyrefly: ignore [missing-import]
-        from pageindex.client import PageIndexClient
-        client = PageIndexClient(api_key=PAGEINDEX_API_KEY)
-        for md_file in STANDARDIZED_DIR.rglob("*.md"):
-            print(f"[OK] Uploading: {md_file.name}")
-    except Exception as e:
-        print(f"[WARN] Upload error: {e}")
+def _sections(content: str) -> list[tuple[str, str]]:
+    matches = list(re.finditer(r"^(#{1,6})\s+(.+)$", content, flags=re.MULTILINE))
+    if not matches:
+        return [("Tổng quan", content)]
+    output: list[tuple[str, str]] = []
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(content)
+        output.append((match.group(2).strip(), content[match.start():end].strip()))
+    return output
 
 
 def pageindex_search(query: str, top_k: int = 5) -> list[dict]:
-    """Vectorless retrieval sử dụng PageIndex / Structural search."""
-    if PAGEINDEX_API_KEY:
-        try:
-            # pyrefly: ignore [missing-import]
-            from pageindex.client import PageIndexClient
-            client = PageIndexClient(api_key=PAGEINDEX_API_KEY)
-            resp = client.submit_query(query=query)
-            retrieval_id = resp.get("retrieval_id") or resp.get("id")
-            if retrieval_id:
-                retrieval = client.get_retrieval(retrieval_id)
-                results = []
-                for node in retrieval.get("retrieved_nodes", [])[:top_k]:
-                    for group in node.get("relevant_contents", []):
-                        for item in group:
-                            results.append({
-                                "content": item.get("relevant_content", ""),
-                                "score": 0.85,
-                                "metadata": {"section": item.get("section_title", "PageIndex")},
-                                "source": "pageindex",
-                            })
-                if results:
-                    return results[:top_k]
-        except Exception:
-            pass
+    """Search document sections structurally using exact lexical coverage.
 
-    # Structural local search fallback
-    results = []
-    if STANDARDIZED_DIR.exists():
-        q_lower = query.lower()
-        for md_file in list(STANDARDIZED_DIR.rglob("*.md"))[:3]:
-            content = md_file.read_text(encoding="utf-8")
-            if any(term in content.lower() for term in q_lower.split()):
-                results.append({
-                    "content": content[:600],
-                    "score": 0.8,
-                    "metadata": {"source": md_file.name, "type": "structural"},
+    This is deliberately independent of Chroma/BM25, so it remains a useful
+    fallback for an empty or low-confidence dense index.
+    """
+    terms = set(tokenize(query))
+    if not terms or not STANDARDIZED_DIR.exists() or top_k < 1:
+        return []
+    candidates: list[dict] = []
+    for path in STANDARDIZED_DIR.rglob("*.md"):
+        content = path.read_text(encoding="utf-8")
+        for section, section_content in _sections(content):
+            haystack = set(tokenize(f"{section} {section_content}"))
+            overlap = len(terms & haystack)
+            if not overlap:
+                continue
+            score = overlap / len(terms)
+            candidates.append(
+                {
+                    "content": section_content[:1800],
+                    "score": round(score, 4),
+                    "metadata": {
+                        "source": path.name,
+                        "relative_path": str(path.relative_to(STANDARDIZED_DIR)).replace("\\", "/"),
+                        "type": "legal" if "legal" in path.parts else "news",
+                        "section": section,
+                    },
                     "source": "pageindex",
-                })
-    return results[:top_k]
+                }
+            )
+    return sorted(candidates, key=lambda item: item["score"], reverse=True)[:top_k]
 
 
-if __name__ == "__main__":
-    results = pageindex_search("danh sách sản phẩm cấm đăng bán", top_k=3)
-    for r in results:
-        print(f"[{r.get('score', 0):.3f}] {r['content'][:100]}...")
+def upload_documents() -> None:
+    """Document the deliberate local-first fallback.
 
+    PageIndex cloud ingestion is optional and provider-specific; this project
+    remains operational without exposing the private policy corpus externally.
+    """
+    print("[INFO] Local structural PageIndex fallback is ready; no upload is required.")

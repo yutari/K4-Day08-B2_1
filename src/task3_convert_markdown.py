@@ -1,6 +1,6 @@
-"""
-Task 3 — Convert toàn bộ file trong data/landing/ thành Markdown.
-"""
+"""Standardise landing documents to Markdown while retaining provenance metadata."""
+
+from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -9,97 +9,89 @@ LANDING_DIR = Path(__file__).parent.parent / "data" / "landing"
 OUTPUT_DIR = Path(__file__).parent.parent / "data" / "standardized"
 
 
+def _metadata_block(metadata: dict[str, str]) -> str:
+    lines = ["---"]
+    for key, value in metadata.items():
+        if value:
+            lines.append(f"{key}: {str(value).replace(chr(10), ' ')}")
+    return "\n".join(lines) + "\n---\n\n"
 
-def convert_legal_docs():
-    """Convert PDF/DOCX files trong data/landing/legal/ sang markdown."""
+
+def _convert_with_markitdown(path: Path) -> str:
+    """Convert a binary office document using the required MarkItDown package."""
+    from markitdown import MarkItDown
+
+    result = MarkItDown().convert(str(path))
+    return result.text_content.strip()
+
+
+def convert_legal_docs() -> None:
     legal_dir = LANDING_DIR / "legal"
     output_dir = OUTPUT_DIR / "legal"
     output_dir.mkdir(parents=True, exist_ok=True)
+    if not legal_dir.exists():
+        return
 
-    for filepath in legal_dir.iterdir():
-        if filepath.suffix.lower() in (".pdf", ".docx", ".doc"):
-            print(f"Converting: {filepath.name}")
-            output_path = output_dir / f"{filepath.stem}.md"
-            text_content = ""
-            try:
-                # pyrefly: ignore [missing-import]
-                import pypdfium2 as pdfium
-                pdf = pdfium.PdfDocument(str(filepath))
-                text_pages = []
-                for page_idx, page in enumerate(pdf, 1):
-                    text = page.get_textpage().get_text_range().strip()
-                    if text:
-                        text_pages.append(f"## Page {page_idx}\n\n{text}")
-                text_content = "\n\n".join(text_pages)
-            except Exception as e:
-                print(f"  Fallback for {filepath.name}: {e}")
+    for path in legal_dir.iterdir():
+        if not path.is_file() or path.suffix.lower() not in {".pdf", ".docx", ".doc"}:
+            continue
+        try:
+            content = _convert_with_markitdown(path)
+        except Exception as exc:
+            raise RuntimeError(f"Không thể chuyển đổi {path.name} bằng MarkItDown: {exc}") from exc
 
-            header = (
-                f"# CHÍNH SÁCH QUY ĐỊNH BẢO MẬT VÀ THƯƠNG MẠI ĐIỆN TỬ: {filepath.stem.upper()}\n\n"
-                f"**Category:** Legal & Customer Support Policy\n"
-                f"**Source File:** {filepath.name}\n"
-                f"**Mục đích:** Quy định quyền lợi, trách nhiệm và quy trình hỗ trợ người mua và người bán trên sàn thương mại điện tử.\n\n"
-                f"---\n\n"
-                f"## 1. Tổng Quan Quy Định Và Phạm Vi Áp Dụng ({filepath.stem})\n\n"
-                f"Văn bản này quy định chi tiết toàn bộ điều khoản, điều kiện áp dụng đối với tất cả người dùng tham gia giao dịch trên sàn thương mại điện tử.\n"
-                f"Người mua và người bán có trách nhiệm tuân thủ nghiêm ngặt các quy định về bảo mật thông tin cá nhân, phương thức thanh toán an toàn, quy trình đổi trả hàng hoàn tiền và xử lý khiếu nại phát sinh.\n\n"
-                f"## 2. Trách Nhiệm Của Các Bên Tham Gia\n\n"
-                f"- **Đối với người mua:** Cung cấp thông tin chính xác, kiểm tra hàng hóa khi nhận và tuân thủ thời hạn gửi yêu cầu hoàn tiền.\n"
-                f"- **Đối với người bán:** Đăng bán hàng hóa đúng mô tả, không bán hàng giả hàng nhái và hỗ trợ giải quyết khiếu nại trong thời hạn quy định.\n\n"
-            )
-            output_path.write_text(header + text_content, encoding="utf-8")
-            print(f"  [OK] Saved: {output_path}")
+        metadata = {
+            "title": path.stem.replace("_", " ").replace("-", " ").title(),
+            "source_file": path.name,
+            "doc_type": "legal",
+            "category": "ecommerce-policy",
+            "version": "unknown",
+        }
+        (output_dir / f"{path.stem}.md").write_text(
+            _metadata_block(metadata) + f"# {metadata['title']}\n\n{content}\n",
+            encoding="utf-8",
+        )
 
 
-
-def convert_news_articles():
-    """Convert JSON, MD, TXT, HTML crawled articles trong data/landing/news/ sang markdown."""
+def convert_news_articles() -> None:
     news_dir = LANDING_DIR / "news"
     output_dir = OUTPUT_DIR / "news"
     output_dir.mkdir(parents=True, exist_ok=True)
+    if not news_dir.exists():
+        return
 
-    for filepath in news_dir.iterdir():
-        if filepath.name.startswith("."):
+    for path in news_dir.iterdir():
+        if not path.is_file() or path.name.startswith("."):
             continue
+        output_path = output_dir / f"{path.stem}.md"
+        if path.suffix.lower() == ".json":
+            article = json.loads(path.read_text(encoding="utf-8"))
+            title = article.get("title") or path.stem
+            metadata = {
+                "title": title,
+                "url": article.get("url", ""),
+                "date_crawled": article.get("date_crawled", ""),
+                "source_file": path.name,
+                "doc_type": "news",
+                "category": "customer-support",
+            }
+            content = article.get("content_markdown", "").strip()
+            if not content.startswith("#"):
+                content = f"# {title}\n\n{content}"
+        elif path.suffix.lower() in {".md", ".txt", ".html"}:
+            metadata = {"source_file": path.name, "doc_type": "news", "category": "customer-support"}
+            content = path.read_text(encoding="utf-8").strip()
+            if not content.startswith("#"):
+                content = f"# {path.stem.replace('_', ' ').title()}\n\n{content}"
+        else:
+            continue
+        output_path.write_text(_metadata_block(metadata) + content + "\n", encoding="utf-8")
 
-        output_path = output_dir / f"{filepath.stem}.md"
 
-        if filepath.suffix.lower() == ".json":
-            print(f"Converting: {filepath.name}")
-            data = json.loads(filepath.read_text(encoding="utf-8"))
-            header = f"# {data.get('title', 'Unknown')}\n\n"
-            header += f"**Source:** {data.get('url', 'N/A')}\n"
-            header += f"**Crawled:** {data.get('date_crawled', 'N/A')}\n\n---\n\n"
-            content = header + data.get("content_markdown", "")
-            output_path.write_text(content, encoding="utf-8")
-            print(f"  [OK] Saved: {output_path}")
-
-        elif filepath.suffix.lower() in (".md", ".txt", ".html"):
-            print(f"Copying/Standardizing: {filepath.name}")
-            text_content = filepath.read_text(encoding="utf-8")
-            if not text_content.startswith("#"):
-                header = f"# CHÍNH SÁCH QUY ĐỊNH: {filepath.stem.upper().replace('_', ' ')}\n\n---\n\n"
-                text_content = header + text_content
-            output_path.write_text(text_content, encoding="utf-8")
-            print(f"  [OK] Saved: {output_path}")
-
-
-
-def convert_all():
-    """Convert toàn bộ files."""
-    print("=" * 50)
-    print("Task 3: Convert to Markdown (MarkItDown)")
-    print("=" * 50)
-
-    print("\n--- Legal Documents ---")
+def convert_all() -> None:
     convert_legal_docs()
-
-    print("\n--- News Articles ---")
     convert_news_articles()
-
-    print("\n[OK] Done! Output path:", OUTPUT_DIR)
 
 
 if __name__ == "__main__":
     convert_all()
-

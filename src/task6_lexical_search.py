@@ -47,6 +47,7 @@ def lexical_search(query: str, top_k: int = 20) -> list[dict]:
         {
             "content": corpus[i]["content"],
             "score": round(float(scores[i]), 4),
+            "score_type": "bm25_raw_score",
             "metadata": corpus[i].get("metadata", {}),
         }
         for i in positive_indices[:top_k]

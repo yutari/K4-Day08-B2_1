@@ -1,9 +1,17 @@
 # Báo cáo A/B RAG
 
-Chưa có kết quả hợp lệ cho phiên bản pipeline hiện tại. Chạy lệnh dưới đây sau khi cài dependencies và index lại knowledge base:
+Đánh giá offline trên **16** câu hỏi Golden Dataset. Các metric dùng cosine similarity của embedding local, vì vậy có thể chạy lặp lại không cần API evaluator; đây không phải kết quả RAGAS/DeepEval.
 
-```powershell
-python group_project/evaluation/eval_pipeline.py
-```
+| Metric | A: Dense-only | B: Hybrid + Cross-Encoder | Chênh lệch |
+|---|---:|---:|---:|
+| Faithfulness (độ trung thực) | 0.9724 | 0.7342 | -23.82% |
+| Answer Relevance (độ liên quan) | 0.7054 | 0.7190 | +1.36% |
+| Context Recall (độ phủ) | 0.6307 | 0.6193 | -1.14% |
+| Context Precision (độ chính xác) | 0.6335 | 0.6296 | -0.39% |
+| **Tổng thể** | **0.7355** | **0.6755** | **-6.00%** |
 
-Script sẽ ghi lại bảng so sánh Dense-only với Hybrid + Cross-Encoder bằng các metric offline, có thể tái lập bằng embedding local.
+## Lưu ý
+
+- Config A chỉ dùng Chroma dense retrieval.
+- Config B dùng Dense + BM25 + weighted RRF + Cross-Encoder; PageIndex local được dùng khi confidence thấp.
+- Muốn đo Faithfulness theo RAGAS/DeepEval cần cấu hình evaluator LLM riêng; không nên gắn nhãn các metric offline này là RAGAS.

@@ -53,5 +53,12 @@ def semantic_search(query: str, top_k: int = 20) -> list[dict]:
     ):
         # Cosine distance is 1 - cosine similarity for this collection.
         score = max(0.0, min(1.0, 1.0 - float(distance)))
-        results.append({"content": document, "score": round(score, 4), "metadata": metadata or {}})
+        results.append(
+            {
+                "content": document,
+                "score": round(score, 4),
+                "score_type": "dense_cosine_similarity",
+                "metadata": metadata or {},
+            }
+        )
     return sorted(results, key=lambda item: item["score"], reverse=True)

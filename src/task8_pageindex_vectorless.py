@@ -48,6 +48,7 @@ def pageindex_search(query: str, top_k: int = 5) -> list[dict]:
                 {
                     "content": section_content[:1800],
                     "score": round(score, 4),
+                    "score_type": "structural_keyword_coverage",
                     "metadata": {
                         "source": path.name,
                         "relative_path": str(path.relative_to(STANDARDIZED_DIR)).replace("\\", "/"),

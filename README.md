@@ -32,11 +32,15 @@ python -m src.task4_chunking_indexing
 streamlit run app.py
 ```
 
-`task3` dùng MarkItDown để chuyển PDF/DOCX; `task4` phải được chạy lại mỗi khi tài liệu trong `data/standardized/` thay đổi. Nếu không cấu hình khóa LLM trong `.env`, chatbot vẫn chạy ở chế độ extractive, trả các đoạn bằng chứng cùng citation. Tùy chọn chạy benchmark:
+`task3` dùng MarkItDown để chuyển PDF/DOCX; `task4` phải được chạy lại mỗi khi tài liệu trong `data/standardized/` thay đổi. Nếu không cấu hình khóa LLM trong `.env`, chatbot vẫn chạy ở chế độ extractive, trả các đoạn bằng chứng cùng citation.
+
+Để chạy benchmark RAGAS thật, thêm `RAGAS_EVALUATOR_API_KEY` (hoặc `OPENAI_API_KEY`) và các model evaluator tùy chọn từ `.env.example`, sau đó chạy:
 
 ```powershell
-python group_project/evaluation/eval_pipeline.py
+python group_project/evaluation/eval_pipeline.py --require-ragas
 ```
+
+Nếu chỉ cần demo offline, có thể bỏ `--require-ragas`; report sẽ ghi rõ đó là cosine proxy, không phải điểm RAGAS.
 
 ---
 

@@ -3,8 +3,22 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from math import exp
 
 _CROSS_ENCODER_MODEL = None
+
+
+def _sigmoid(value: float) -> float:
+    """Map a Cross-Encoder logit to a stable 0–1 display relevance value.
+
+    The MS MARCO model emits an unbounded logit.  This transformation is used
+    only for a human-readable relevance display, not as a calibrated confidence
+    threshold for fallback decisions.
+    """
+    if value >= 0:
+        return 1.0 / (1.0 + exp(-value))
+    positive = exp(value)
+    return positive / (1.0 + positive)
 
 
 def get_cross_encoder():
@@ -42,7 +56,12 @@ def fuse_rrf(
                 merged["sparse_score"] = max(float(item["sparse_score"]), float(merged.get("sparse_score", 0.0)))
     output: list[dict] = []
     for key, rrf_score in sorted(fusion_scores.items(), key=lambda pair: pair[1], reverse=True)[:top_k]:
-        item = {**candidates[key], "rrf_score": round(rrf_score, 6), "score": round(rrf_score, 6)}
+        item = {
+            **candidates[key],
+            "rrf_score": round(rrf_score, 6),
+            "score": round(rrf_score, 6),
+            "score_type": "weighted_rrf_rank",
+        }
         output.append(item)
     return output
 
@@ -55,7 +74,16 @@ def rerank_cross_encoder(query: str, candidates: list[dict], top_k: int = 5) -> 
         scores = get_cross_encoder().predict([(query, item["content"]) for item in candidates])
         ranked = []
         for item, score in zip(candidates, scores):
-            updated = {**item, "cross_encoder_score": round(float(score), 4), "score": round(float(score), 4)}
+            raw_logit = float(score)
+            normalized_relevance = _sigmoid(raw_logit)
+            updated = {
+                **item,
+                "cross_encoder_score": round(raw_logit, 4),
+                "cross_encoder_raw_score": round(raw_logit, 4),
+                "normalized_score": round(normalized_relevance, 4),
+                "score": round(normalized_relevance, 4),
+                "score_type": "cross_encoder_normalized_relevance",
+            }
             ranked.append(updated)
         return sorted(ranked, key=lambda item: item["score"], reverse=True)[:top_k]
     except Exception:

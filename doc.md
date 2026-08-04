@@ -171,6 +171,20 @@ Cross-Encoder nhận đồng thời cặp `(query, chunk)` và đánh giá mức
 
 Nếu model không tải được, pipeline không dừng hoàn toàn mà giữ lại thứ hạng RRF làm phương án dự phòng.
 
+### Ý nghĩa các loại score trên giao diện
+
+Các retriever không dùng cùng một thang điểm, nên UI hiển thị rõ loại score thay vì gọi chung là `score`:
+
+| Nhãn UI | Thang đo | Ý nghĩa |
+|---|---|---|
+| `CE relevance` | 0–100% | Raw Cross-Encoder logit được sigmoid-normalize để dễ đọc; dùng để so thứ hạng trong cùng một query, không phải xác suất tuyệt đối. |
+| `Dense cosine` | 0–100% | Cosine similarity của embedding, dùng cho confidence/fallback threshold. |
+| `RRF rank` | số nhỏ | Điểm fusion dựa trên vị trí xếp hạng, không phải phần trăm. |
+| `BM25 raw` | số dương | Điểm khớp từ khóa, chỉ so sánh trong cùng một query. |
+| `Keyword coverage` | 0–100% | Mức độ chồng lấp từ khóa của structural fallback. |
+
+Ví dụ raw logit Cross-Encoder `6.7523` được UI hiển thị là `CE relevance: 99.9%`, đồng thời phần chi tiết vẫn giữ raw logit, Dense cosine và RRF rank để kiểm tra.
+
 ---
 
 ## 9. Confidence và Structural Fallback
@@ -262,14 +276,30 @@ Evaluation hiện chạy A/B giữa:
 | A | Dense-only Chroma retrieval |
 | B | Dense + BM25 + Weighted RRF + Cross-Encoder + fallback |
 
-Bốn metric offline hiện có:
+Khi cấu hình evaluator API, script dùng **RAGAS 0.1.21** để chạy bốn metric LLM-based:
 
-1. Faithfulness proxy.
-2. Answer Relevance proxy.
-3. Context Recall proxy.
-4. Context Precision proxy.
+1. Faithfulness.
+2. Answer Relevancy.
+3. Context Recall.
+4. Context Precision.
 
-> Lưu ý: các metric hiện tại dùng cosine similarity từ embedding local để có thể chạy không cần API. Chúng **không phải** RAGAS/DeepEval/TruLens chính thức. Muốn chấm theo rubric evaluation nghiêm ngặt, cần tích hợp thêm một trong các framework đó và lưu report kết quả thật.
+Thiết lập evaluator trong `.env`:
+
+```text
+RAGAS_EVALUATOR_API_KEY=...
+RAGAS_EVALUATOR_MODEL=gpt-4o-mini
+RAGAS_EVALUATOR_EMBEDDING_MODEL=text-embedding-3-small
+```
+
+Sau đó chạy lệnh strict sau để chỉ chấp nhận kết quả RAGAS thật:
+
+```powershell
+python group_project/evaluation/eval_pipeline.py --require-ragas
+```
+
+Report tự động xuất bảng so sánh A/B, thay đổi từng metric và 5 **Worst Performers** của Config B, gồm nguyên nhân khả dĩ và đề xuất cải thiện.
+
+Nếu không có evaluator API, chạy không có `--require-ragas` sẽ dùng cosine proxy local để demo không bị dừng. Report sẽ gắn nhãn rõ đó là **offline fallback, không phải điểm RAGAS**.
 
 ---
 
@@ -289,8 +319,8 @@ pytest tests/ -v
 # Khởi động giao diện
 streamlit run app.py
 
-# Chạy evaluation A/B
-python group_project/evaluation/eval_pipeline.py
+# Chạy evaluation A/B RAGAS thật
+python group_project/evaluation/eval_pipeline.py --require-ragas
 ```
 
 ---
@@ -302,8 +332,8 @@ python group_project/evaluation/eval_pipeline.py
 | `all-MiniLM-L6-v2` nhẹ nhưng không tối ưu cho tiếng Việt | Thử `BAAI/bge-m3` hoặc embedding tiếng Việt chuyên dụng. |
 | BM25 cần từ khóa cùng ngôn ngữ | Thêm synonym dictionary/song ngữ hoặc query translation. |
 | Fallback là structural local search | Tích hợp PageIndex cloud SDK nếu có yêu cầu sử dụng dịch vụ này. |
-| Citation của LLM được hướng dẫn bằng prompt | Hậu kiểm citation để bảo đảm nhãn citation hợp lệ. |
-| Evaluation là metric proxy offline | Tích hợp RAGAS/DeepEval/TruLens với evaluator LLM. |
+| RAGAS cần evaluator API riêng | Dùng `--require-ragas` khi chấm điểm để không nhận metric proxy. |
+| LLM có thể trả lời bằng format citation không đúng | Hệ thống đã hậu kiểm source + section; câu trả lời không hợp lệ chuyển sang extractive fallback. |
 | Chưa có deployment | Deploy lên Hugging Face Spaces, Render hoặc Streamlit Community Cloud. |
 
 ## 15. Kết luận

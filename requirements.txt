@@ -34,9 +34,12 @@ openai>=1.30.0
 streamlit>=1.35.0
 
 # Group project - Evaluation
-ragas>=0.1.21
-datasets>=2.14.0
-langchain-openai>=0.1.0
+# eval_pipeline.py uses the stable RAGAS 0.1 API (faithfulness,
+# answer_relevancy, context_recall, context_precision). Pin it so a fresh
+# install does not silently receive an incompatible major API.
+ragas>=0.1.21,<0.3.0
+datasets>=2.14.0,<3.0.0
+langchain-openai>=0.1.0,<0.2.0
 
 # Testing (dung de cham diem bai ca nhan)
 pytest>=7.0.0

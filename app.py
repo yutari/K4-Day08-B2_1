@@ -7,6 +7,9 @@ Theme: Bright Cool Light Mode (Màu lạnh sáng đẹp) với Direct Source Web
 import os
 import sys
 import json
+import math
+import re
+import unicodedata
 from pathlib import Path
 
 import streamlit as st
@@ -204,23 +207,101 @@ st.markdown("""
 # HELPER: RENDER SOURCE CARD WITH UNIQUE KEYS
 # =============================================================================
 
+STANDARDIZED_DIR = PROJECT_ROOT / "data" / "standardized"
+
+
+def _normalise_source_key(value: object) -> str:
+    """Convert a title or filename to a comparable URL-map key."""
+    text = unicodedata.normalize("NFD", str(value or ""))
+    text = "".join(character for character in text if unicodedata.category(character) != "Mn")
+    text = text.casefold().removesuffix(".md")
+    return re.sub(r"[^a-z0-9]+", "_", text).strip("_")
+
+
+def resolve_source_url(metadata: dict, chunk_content: str) -> str | None:
+    """Resolve a source URL even when a retrieved chunk omits the document header."""
+    direct_url = str(metadata.get("url") or "").strip()
+    if direct_url.startswith(("https://", "http://")):
+        return direct_url
+
+    normalized_map = {_normalise_source_key(key): url for key, url in URL_MAP.items()}
+    for value in (metadata.get("source"), metadata.get("relative_path"), metadata.get("title")):
+        raw_value = str(value or "")
+        for key in (raw_value, Path(raw_value).name, _normalise_source_key(raw_value)):
+            url = URL_MAP.get(key) or normalized_map.get(_normalise_source_key(key))
+            if url:
+                return url
+
+    source_texts = [chunk_content]
+    relative_path = str(metadata.get("relative_path") or metadata.get("source") or "")
+    if relative_path:
+        document_path = (STANDARDIZED_DIR / relative_path).resolve()
+        if STANDARDIZED_DIR.resolve() in document_path.parents and document_path.is_file():
+            try:
+                source_texts.append(document_path.read_text(encoding="utf-8"))
+            except OSError:
+                pass
+
+    for text in source_texts:
+        match = re.search(r"^\*\*Source:\*\*\s*(https?://\S+)", text, flags=re.MULTILINE)
+        if not match:
+            match = re.search(r"^url:\s*(https?://\S+)", text, flags=re.MULTILINE | re.IGNORECASE)
+        if match:
+            return match.group(1).rstrip(".,)")
+    return None
+
+
+def score_presentation(src: dict) -> tuple[str, str, str]:
+    """Render each retrieval score with its correct scale and meaning."""
+    try:
+        score = float(src.get("score", 0.0))
+    except (TypeError, ValueError):
+        score = 0.0
+    score_type = src.get("score_type", "")
+    details = []
+
+    dense_score = src.get("dense_score")
+    if dense_score is not None:
+        details.append(f"Dense cosine: {float(dense_score) * 100:.1f}%")
+    rrf_score = src.get("rrf_score")
+    if rrf_score is not None:
+        details.append(f"RRF rank: {float(rrf_score):.5f}")
+    sparse_score = src.get("sparse_score")
+    if sparse_score is not None:
+        details.append(f"BM25 raw: {float(sparse_score):.3f}")
+
+    is_cross_encoder_score = score_type == "cross_encoder_normalized_relevance" or "cross_encoder_score" in src
+    if is_cross_encoder_score:
+        raw_logit = src.get("cross_encoder_raw_score", src.get("cross_encoder_score", 0.0))
+        normalized_score = src.get("normalized_score")
+        if normalized_score is None:
+            # Backward compatibility for answers retained in session state
+            # before score normalisation was introduced.
+            raw_value = float(raw_logit)
+            normalized_score = 1.0 / (1.0 + math.exp(-raw_value)) if raw_value >= 0 else math.exp(raw_value) / (1.0 + math.exp(raw_value))
+        details.insert(0, f"Raw CE logit: {float(raw_logit):.4f}")
+        return "CE relevance", f"{float(normalized_score) * 100:.1f}%", " · ".join(details)
+    if score_type == "structural_keyword_coverage":
+        return "Keyword coverage", f"{score * 100:.1f}%", "Structural fallback"
+    if score_type == "weighted_rrf_rank":
+        return "RRF rank", f"{score:.5f}", " · ".join(details)
+    if score_type == "dense_cosine_similarity":
+        return "Dense cosine", f"{score * 100:.1f}%", "Cosine similarity (0–100%)"
+    if score_type == "bm25_raw_score":
+        return "BM25 raw", f"{score:.4f}", "BM25 scores are only comparable within the same query."
+    return "Score", f"{score:.4f}", " · ".join(details)
+
+
 def render_source_card(i: int, src: dict, key_prefix: str = "src"):
     meta = src.get("metadata", {})
     source_name = meta.get("title") or meta.get("source", "Chính sách")
+    source_file = meta.get("relative_path") or meta.get("source", source_name)
     doc_type = meta.get("type", "policy")
-    score = src.get("score", 0.0)
+    score_label, score_value, score_detail = score_presentation(src)
     ret_src = src.get("source", "hybrid")
     content_str = src.get("content", "")
 
-    # Resolve URL
-    url = meta.get("url") or URL_MAP.get(source_name)
-    if not url or not str(url).startswith("http"):
-        for line in content_str.splitlines()[:10]:
-            if "**Source:**" in line:
-                extracted = line.split("**Source:**")[1].strip()
-                if extracted.startswith("http"):
-                    url = extracted
-                    break
+    url = resolve_source_url(meta, content_str)
 
     col_a, col_b = st.columns([2.5, 1.5])
     with col_a:
@@ -233,10 +314,12 @@ def render_source_card(i: int, src: dict, key_prefix: str = "src"):
 
     with col_b:
         st.markdown(
-            f"<span class='badge-score'>score: {score:.4f}</span> "
+            f"<span class='badge-score'>{score_label}: {score_value}</span> "
             f"<span class='badge-hybrid'>{ret_src}</span>",
             unsafe_allow_html=True
         )
+        if score_detail:
+            st.caption(score_detail)
         if url and str(url).startswith("http"):
             st.link_button("🔗 Mở Nguồn Web Trực Tiếp", url=url, use_container_width=True, key=f"btn_{key_prefix}_{i}_{id(src)}")
 
@@ -398,13 +481,21 @@ with tab1:
                     answer = res.get("answer", "Không thể tạo câu trả lời.")
                     sources = res.get("sources", [])
                     ret_source = res.get("retrieval_source", "hybrid")
+                    citation_status = res.get("citation_validation", "unknown")
 
                 except Exception as e:
                     answer = f"❌ **Đã xảy ra lỗi hệ thống:** {e}"
                     sources = []
                     ret_source = "error"
+                    citation_status = "error"
 
                 st.markdown(answer)
+                if citation_status == "validated":
+                    st.caption("✅ Citation đã được hậu kiểm theo source và section của context.")
+                elif citation_status == "extractive_fallback":
+                    st.caption("🛡️ Citation do LLM không hợp lệ hoặc thiếu; hệ thống đã chuyển sang evidence extractive có nguồn xác thực.")
+                elif citation_status == "no_evidence":
+                    st.caption("ℹ️ Không có evidence phù hợp trong kho tài liệu hiện tại.")
                 if rewritten_query != query:
                     st.caption(f"Truy vấn đã được hiểu theo ngữ cảnh: {rewritten_query}")
 
@@ -418,6 +509,7 @@ with tab1:
             "content": answer,
             "sources": sources,
             "retrieval_source": ret_source,
+            "citation_validation": citation_status,
         })
 
 # =============================================================================
@@ -431,7 +523,14 @@ with tab2:
     results_path = PROJECT_ROOT / "group_project" / "evaluation" / "results.md"
     if results_path.exists():
         st.caption("Báo cáo dưới đây là kết quả lần chạy gần nhất, không phải số liệu hard-code.")
-        st.markdown(results_path.read_text(encoding="utf-8"))
+        report_text = results_path.read_text(encoding="utf-8")
+        if "Worst Performers" not in report_text:
+            st.warning(
+                "Báo cáo này được tạo bởi pipeline cũ. Hãy chạy "
+                "`python group_project/evaluation/eval_pipeline.py --require-ragas` "
+                "để có RAGAS thật và Worst Performers."
+            )
+        st.markdown(report_text)
     else:
         st.info("Chưa có báo cáo. Chạy `python group_project/evaluation/eval_pipeline.py` sau khi index dữ liệu.")
 

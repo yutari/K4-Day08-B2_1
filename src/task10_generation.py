@@ -69,12 +69,14 @@ def generate_with_citation(query: str, top_k: int = TOP_K) -> dict:
             from openai import OpenAI
             base_url = "https://openrouter.ai/api/v1" if os.getenv("OPENROUTER_API_KEY") else None
             client = OpenAI(api_key=api_key, base_url=base_url)
+            model_name = os.getenv("LLM_MODEL", "gpt-4o")
             response = client.chat.completions.create(
-                model=LLM_MODEL if os.getenv("OPENROUTER_API_KEY") else "gpt-4o-mini",
+                model=model_name,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": user_message}
                 ],
+
                 temperature=TEMPERATURE,
                 top_p=TOP_P,
             )

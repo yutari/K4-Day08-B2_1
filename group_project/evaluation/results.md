@@ -10,8 +10,8 @@
 
 | Metric Đánh Giá | Config A (Baseline: Dense-Only) | Config B (Advanced: Hybrid RRF + Rerank) | Mức Độ Cải Thiện (%) |
 |:---|:---:|:---:|:---:|
-| **Faithfulness (Độ trung thực)** | `0.8994` | **`0.8767`** | **+-2.27%** |
-| **Answer Relevance (Độ liên quan)** | `0.8404` | **`0.8793`** | **+3.89%** |
+| **Faithfulness (Độ trung thực)** | `0.8994` | **`0.8799`** | **+-1.95%** |
+| **Answer Relevance (Độ liên quan)** | `0.8404` | **`0.8761`** | **+3.57%** |
 | **Context Recall (Độ phủ Context)** | `0.8367` | **`0.8202`** | **+-1.65%** |
 | **Context Precision (Độ chính xác)** | `0.8272` | **`0.8240`** | **+-0.32%** |
 | **ĐIỂM TRUNG BÌNH TỔNG THỂ** | `0.8509` | **`0.8500`** | **+-0.09%** |

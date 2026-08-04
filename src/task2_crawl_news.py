@@ -125,22 +125,25 @@ async def crawl_article(url: str) -> dict:
         from crawl4ai import AsyncWebCrawler
         async with AsyncWebCrawler() as crawler:
             result = await crawler.arun(url=url)
-            return {
-                "url": url,
-                "title": result.metadata.get("title", "Hướng dẫn Hỗ trợ"),
-                "date_crawled": datetime.now().isoformat(),
-                "content_markdown": result.markdown if result.markdown else "Nội dung bài viết hỗ trợ",
-            }
+            if result.success and result.markdown:
+                return {
+                    "url": url,
+                    "title": result.metadata.get("title", "Hướng dẫn Hỗ trợ"),
+                    "date_crawled": datetime.now().isoformat(),
+                    "content_markdown": result.markdown,
+                }
     except Exception:
-        for s in SAMPLE_ARTICLES:
-            if s["url"] == url:
-                return s
-        return {
-            "url": url,
-            "title": "Hướng dẫn hỗ trợ thương mại điện tử",
-            "date_crawled": datetime.now().isoformat(),
-            "content_markdown": "Nội dung hướng dẫn thanh toán và hỗ trợ người dùng trên sàn thương mại điện tử.",
-        }
+        pass
+
+    for s in SAMPLE_ARTICLES:
+        if s["url"] == url:
+            return s
+    return {
+        "url": url,
+        "title": "Hướng dẫn hỗ trợ thương mại điện tử",
+        "date_crawled": datetime.now().isoformat(),
+        "content_markdown": "Nội dung hướng dẫn thanh toán và hỗ trợ người dùng trên sàn thương mại điện tử.",
+    }
 
 
 def save_sample_news():
@@ -169,4 +172,5 @@ async def crawl_all():
 
 if __name__ == "__main__":
     save_sample_news()
+
 

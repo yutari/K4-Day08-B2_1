@@ -26,6 +26,7 @@ và chỉ dùng nguồn công khai/được phép chia sẻ.
 """
 
 from pathlib import Path
+from fpdf import FPDF
 
 DATA_DIR = Path(__file__).parent.parent / "data" / "landing" / "legal"
 
@@ -36,22 +37,43 @@ def setup_directory():
     print(f"✓ Thư mục đã sẵn sàng: {DATA_DIR}")
 
 
-# TODO: Tải file PDF/DOCX về DATA_DIR
-# Có thể tải thủ công hoặc viết script download nếu có direct link.
-#
-# Ví dụ nếu có direct link:
-#
-# import requests
-#
-# def download_file(url: str, filename: str):
-#     response = requests.get(url)
-#     filepath = DATA_DIR / filename
-#     filepath.write_bytes(response.content)
-#     print(f"✓ Đã tải: {filepath}")
-#
-# Nếu trang là HTML thuần (không phải PDF sẵn), có thể convert nội dung text
-# thành PDF đơn giản bằng thư viện fpdf2 (đã có trong requirements.txt).
+def generate_sample_pdfs():
+    """Tạo 3 file PDF mẫu bằng fpdf2."""
+    policies = [
+        {
+            "filename": "chinh-sach-tra-hang.pdf",
+            "title": "Chinh sach tra hang va hoan tien",
+            "content": "1. Dieu kien tra hang: Khach hang co the tra hang trong vong 7 ngay.\n2. Quy trinh hoan tien: Tien se duoc hoan vao vi trong 24h.",
+            "role": "both"
+        },
+        {
+            "filename": "phuong-thuc-thanh-toan.pdf",
+            "title": "Phuong thuc thanh toan",
+            "content": "1. Thanh toan khi nhan hang (COD).\n2. Thanh toan qua the tin dung/ghi no.\n3. Thanh toan qua vi dien tu.",
+            "role": "buyer"
+        },
+        {
+            "filename": "quy-dinh-nguoi-ban.pdf",
+            "title": "Quy dinh danh cho nguoi ban",
+            "content": "1. Khong dang ban hang gia, hang nhai.\n2. Thoi gian chuan bi hang toi da 2 ngay.\n3. Phi san giao dich la 3%.",
+            "role": "seller"
+        }
+    ]
+
+    for policy in policies:
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("helvetica", "B", 16)
+        pdf.cell(0, 10, policy["title"], ln=True, align="C")
+        pdf.ln(10)
+        pdf.set_font("helvetica", "", 12)
+        pdf.multi_cell(0, 10, policy["content"])
+        
+        filepath = DATA_DIR / policy["filename"]
+        pdf.output(str(filepath))
+        print(f"✓ Đã tạo file: {filepath} (Metadata role: {policy['role']})")
 
 
 if __name__ == "__main__":
     setup_directory()
+    generate_sample_pdfs()

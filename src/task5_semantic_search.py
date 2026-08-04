@@ -74,3 +74,4 @@ if __name__ == "__main__":
     for r in results:
         print(f"[{r['score']:.3f}] {r['content'][:100]}...")
 
+

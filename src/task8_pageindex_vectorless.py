@@ -4,6 +4,7 @@ Task 8 — PageIndex Vectorless RAG.
 
 import os
 from pathlib import Path
+# pyrefly: ignore [missing-import]
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -18,6 +19,7 @@ def upload_documents():
         print("[INFO] PAGEINDEX_API_KEY không tồn tại, bỏ qua upload.")
         return
     try:
+        # pyrefly: ignore [missing-import]
         from pageindex.client import PageIndexClient
         client = PageIndexClient(api_key=PAGEINDEX_API_KEY)
         for md_file in STANDARDIZED_DIR.rglob("*.md"):
@@ -30,6 +32,7 @@ def pageindex_search(query: str, top_k: int = 5) -> list[dict]:
     """Vectorless retrieval sử dụng PageIndex / Structural search."""
     if PAGEINDEX_API_KEY:
         try:
+            # pyrefly: ignore [missing-import]
             from pageindex.client import PageIndexClient
             client = PageIndexClient(api_key=PAGEINDEX_API_KEY)
             resp = client.submit_query(query=query)

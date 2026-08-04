@@ -2,12 +2,12 @@
 Task 2 — Crawl bài viết/hướng dẫn hỗ trợ khách hàng về thương mại điện tử.
 """
 
-import asyncio
 import json
 from datetime import datetime
 from pathlib import Path
 
 DATA_DIR = Path(__file__).parent.parent / "data" / "landing" / "news"
+
 
 
 def setup_directory():
@@ -122,6 +122,7 @@ Tại trang **Thanh toán**, gạt nút **Sử dụng Xu** để trừ tiền tr
 async def crawl_article(url: str) -> dict:
     """Crawl một bài viết và trả về dict chứa metadata + content."""
     try:
+        # pyrefly: ignore [missing-import]
         from crawl4ai import AsyncWebCrawler
         async with AsyncWebCrawler() as crawler:
             result = await crawler.arun(url=url)

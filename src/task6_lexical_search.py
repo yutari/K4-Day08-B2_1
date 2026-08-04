@@ -2,9 +2,16 @@
 Task 6 — Lexical Search Module (BM25).
 """
 
+# pyrefly: ignore [missing-import]
 from rank_bm25 import BM25Okapi
+# pyrefly: ignore [missing-import]
 import numpy as np
-from src.task4_chunking_indexing import load_documents, chunk_documents
+
+try:
+    from src.task4_chunking_indexing import load_documents, chunk_documents
+except ImportError:
+    from .task4_chunking_indexing import load_documents, chunk_documents
+
 
 _CORPUS = None
 _BM25_INDEX = None

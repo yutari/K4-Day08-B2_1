@@ -3,7 +3,9 @@ Task 5 — Semantic Search Module.
 """
 
 from pathlib import Path
+# pyrefly: ignore [missing-import]
 import chromadb
+# pyrefly: ignore [missing-import]
 from sentence_transformers import SentenceTransformer
 
 CHROMA_DIR = Path(__file__).parent.parent / "chroma_db"

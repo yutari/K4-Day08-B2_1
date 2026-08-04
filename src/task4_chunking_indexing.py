@@ -38,7 +38,9 @@ def load_documents() -> list[dict]:
 
 def chunk_documents(documents: list[dict]) -> list[dict]:
     """Chunk documents theo strategy RecursiveCharacterTextSplitter."""
+    # pyrefly: ignore [missing-import]
     from langchain_text_splitters import RecursiveCharacterTextSplitter
+
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE,
@@ -59,6 +61,7 @@ def chunk_documents(documents: list[dict]) -> list[dict]:
 
 def embed_chunks(chunks: list[dict]) -> list[dict]:
     """Embed toàn bộ chunks bằng SentenceTransformer."""
+    # pyrefly: ignore [missing-import]
     from sentence_transformers import SentenceTransformer
 
     model = SentenceTransformer(EMBEDDING_MODEL)
@@ -71,6 +74,7 @@ def embed_chunks(chunks: list[dict]) -> list[dict]:
 
 def index_to_vectorstore(chunks: list[dict]):
     """Lưu chunks vào vector store ChromaDB."""
+    # pyrefly: ignore [missing-import]
     import chromadb
 
     CHROMA_DIR.mkdir(parents=True, exist_ok=True)

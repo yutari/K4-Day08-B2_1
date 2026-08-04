@@ -2,10 +2,17 @@
 Task 9 — Retrieval Pipeline Hoàn Chỉnh.
 """
 
-from .task5_semantic_search import semantic_search
-from .task6_lexical_search import lexical_search
-from .task7_reranking import rerank, rerank_rrf
-from .task8_pageindex_vectorless import pageindex_search
+try:
+    from src.task5_semantic_search import semantic_search
+    from src.task6_lexical_search import lexical_search
+    from src.task7_reranking import rerank, rerank_rrf
+    from src.task8_pageindex_vectorless import pageindex_search
+except ImportError:
+    from .task5_semantic_search import semantic_search
+    from .task6_lexical_search import lexical_search
+    from .task7_reranking import rerank, rerank_rrf
+    from .task8_pageindex_vectorless import pageindex_search
+
 
 SCORE_THRESHOLD = 0.25
 DEFAULT_TOP_K = 5
@@ -59,5 +66,7 @@ if __name__ == "__main__":
         print("-" * 60)
         results = retrieve(q, top_k=3)
         for i, r in enumerate(results, 1):
-            print(f"  {i}. [{r['score']:.3f}] [{r.get('source', 'hybrid')}] {r['content'][:80]}...")
+            text_preview = r['content'][:80].encode('ascii', errors='ignore').decode('ascii')
+            print(f"  {i}. [{r['score']:.3f}] [{r.get('source', 'hybrid')}] {text_preview}...")
+
 

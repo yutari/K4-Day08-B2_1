@@ -5,11 +5,9 @@ Task 3 — Convert toàn bộ file trong data/landing/ thành Markdown.
 import json
 from pathlib import Path
 
-# pyrefly: ignore [missing-import]
-from markitdown import MarkItDown
-
 LANDING_DIR = Path(__file__).parent.parent / "data" / "landing"
 OUTPUT_DIR = Path(__file__).parent.parent / "data" / "standardized"
+
 
 
 def convert_legal_docs():
@@ -24,6 +22,7 @@ def convert_legal_docs():
             output_path = output_dir / f"{filepath.stem}.md"
             text_content = ""
             try:
+                # pyrefly: ignore [missing-import]
                 import pypdfium2 as pdfium
                 pdf = pdfium.PdfDocument(str(filepath))
                 text_pages = []

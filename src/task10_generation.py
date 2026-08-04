@@ -3,11 +3,16 @@ Task 10 — Generation Có Citation.
 """
 
 import os
+# pyrefly: ignore [missing-import]
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from .task9_retrieval_pipeline import retrieve
+try:
+    from src.task9_retrieval_pipeline import retrieve
+except ImportError:
+    from .task9_retrieval_pipeline import retrieve
+
 
 TOP_K = 5
 TOP_P = 0.9
@@ -60,6 +65,7 @@ def generate_with_citation(query: str, top_k: int = TOP_K) -> dict:
     api_key = os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY") or os.getenv("GEMINI_API_KEY")
     if api_key:
         try:
+            # pyrefly: ignore [missing-import]
             from openai import OpenAI
             base_url = "https://openrouter.ai/api/v1" if os.getenv("OPENROUTER_API_KEY") else None
             client = OpenAI(api_key=api_key, base_url=base_url)

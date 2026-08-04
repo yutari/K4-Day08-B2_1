@@ -3,7 +3,8 @@ Task 7 — Reranking Module.
 """
 
 from typing import Optional
-import numpy as np
+# pyrefly: ignore [missing-import]
+import numpy as np  
 
 
 _CROSS_ENCODER_MODEL = None
@@ -12,6 +13,7 @@ _CROSS_ENCODER_MODEL = None
 def get_cross_encoder():
     global _CROSS_ENCODER_MODEL
     if _CROSS_ENCODER_MODEL is None:
+        # pyrefly: ignore [missing-import]
         from sentence_transformers import CrossEncoder
         _CROSS_ENCODER_MODEL = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
     return _CROSS_ENCODER_MODEL

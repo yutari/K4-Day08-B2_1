@@ -1,9 +1,8 @@
 """
-Task 10 — Generation Có Citation.
+Task 10 — Generation Có Citation (Hỗ trợ OpenAI, Google Gemini 1.5 Flash, OpenRouter).
 """
 
 import os
-# pyrefly: ignore [missing-import]
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -17,7 +16,7 @@ except ImportError:
 TOP_K = 5
 TOP_P = 0.9
 TEMPERATURE = 0.3
-LLM_MODEL = os.getenv("LLM_MODEL", "google/gemini-2.0-flash-exp:free")
+LLM_MODEL = os.getenv("LLM_MODEL", "gemini-1.5-flash")
 
 SYSTEM_PROMPT = """Bạn là trợ lý trả lời câu hỏi về chính sách thương mại điện tử và hỗ trợ
 khách hàng (thanh toán, đổi trả, giao hàng, quyền riêng tư, quy định người bán).
@@ -54,7 +53,7 @@ def format_context(chunks: list[dict]) -> str:
 
 
 def generate_with_citation(query: str, top_k: int = TOP_K) -> dict:
-    """End-to-end RAG generation có citation."""
+    """End-to-end RAG generation có citation với hỗ trợ Gemini 1.5 Flash & OpenAI."""
     chunks = retrieve(query, top_k=top_k)
     reordered = reorder_for_llm(chunks)
     context = format_context(reordered)
@@ -62,13 +61,56 @@ def generate_with_citation(query: str, top_k: int = TOP_K) -> dict:
     user_message = f"Context:\n{context}\n\n---\n\nQuestion: {query}"
     answer = ""
 
-    api_key = os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY") or os.getenv("GEMINI_API_KEY")
-    if api_key:
+    openrouter_key = os.getenv("OPENROUTER_API_KEY")
+    gemini_key = os.getenv("GEMINI_API_KEY")
+    openai_key = os.getenv("OPENAI_API_KEY")
+
+    # Provider 1: Direct Google Gemini API (via OpenAI-compatible endpoint)
+    if gemini_key:
         try:
-            # pyrefly: ignore [missing-import]
             from openai import OpenAI
-            base_url = "https://openrouter.ai/api/v1" if os.getenv("OPENROUTER_API_KEY") else None
-            client = OpenAI(api_key=api_key, base_url=base_url)
+            client = OpenAI(
+                api_key=gemini_key,
+                base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
+            )
+            model_name = os.getenv("LLM_MODEL", "gemini-1.5-flash")
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_message}
+                ],
+                temperature=TEMPERATURE,
+                top_p=TOP_P,
+            )
+            answer = response.choices[0].message.content
+        except Exception:
+            pass
+
+    # Provider 2: OpenRouter API
+    if not answer and openrouter_key:
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=openrouter_key, base_url="https://openrouter.ai/api/v1")
+            model_name = os.getenv("LLM_MODEL", "google/gemini-1.5-flash")
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_message}
+                ],
+                temperature=TEMPERATURE,
+                top_p=TOP_P,
+            )
+            answer = response.choices[0].message.content
+        except Exception:
+            pass
+
+    # Provider 3: Direct OpenAI API
+    if not answer and openai_key:
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=openai_key)
             model_name = os.getenv("LLM_MODEL", "gpt-4o")
             response = client.chat.completions.create(
                 model=model_name,
@@ -76,14 +118,15 @@ def generate_with_citation(query: str, top_k: int = TOP_K) -> dict:
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": user_message}
                 ],
-
                 temperature=TEMPERATURE,
                 top_p=TOP_P,
             )
             answer = response.choices[0].message.content
-        except Exception as e:
-            answer = f"Dựa trên các tài liệu trích dẫn:\n\n" + "\n\n".join([f"- {c['content'][:150]}... [Nguồn: {c.get('metadata',{}).get('source','Chính sách')}]" for c in chunks[:3]])
-    else:
+        except Exception:
+            pass
+
+    # Fallback template
+    if not answer:
         answer = f"Dựa trên các văn bản quy định:\n\n" + "\n\n".join([f"- {c['content'][:150]}... [Nguồn: {c.get('metadata',{}).get('source','Chính sách')}]" for c in chunks[:3]])
 
     retrieval_src = chunks[0].get("source", "hybrid") if chunks else "none"
@@ -110,5 +153,3 @@ if __name__ == "__main__":
         ans = result['answer'].encode('ascii', errors='ignore').decode('ascii')
         print(f"\nA: {ans[:200]}...")
         print(f"\n[Sources: {len(result['sources'])} chunks | via {result['retrieval_source']}]")
-
-

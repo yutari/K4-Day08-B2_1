@@ -21,6 +21,8 @@ from pathlib import Path
 CORPUS: list[dict] = []  # List of {'content': str, 'metadata': dict}
 
 
+_bm25_model = None
+
 def build_bm25_index(corpus: list[dict]):
     """
     Xây dựng BM25 index từ corpus.
@@ -28,15 +30,12 @@ def build_bm25_index(corpus: list[dict]):
     Args:
         corpus: List of {'content': str, 'metadata': dict}
     """
-    # TODO: Implement BM25 index
-    #
-    # from rank_bm25 import BM25Okapi
-    #
-    # # Tokenize - có thể đơn giản split(), hoặc dùng underthesea cho tiếng Việt
-    # tokenized_corpus = [doc["content"].lower().split() for doc in corpus]
-    # bm25 = BM25Okapi(tokenized_corpus)
-    # return bm25
-    raise NotImplementedError("Implement build_bm25_index")
+    from rank_bm25 import BM25Okapi
+    
+    # Tokenize - có thể đơn giản split(), hoặc dùng underthesea cho tiếng Việt
+    tokenized_corpus = [doc["content"].lower().split() for doc in corpus]
+    bm25 = BM25Okapi(tokenized_corpus)
+    return bm25
 
 
 def lexical_search(query: str, top_k: int = 10) -> list[dict]:
@@ -55,25 +54,50 @@ def lexical_search(query: str, top_k: int = 10) -> list[dict]:
         }
         Sorted by score descending.
     """
-    # TODO: Implement lexical search
-    #
-    # tokenized_query = query.lower().split()
-    # scores = bm25.get_scores(tokenized_query)
-    #
-    # # Get top_k indices
-    # import numpy as np
-    # top_indices = np.argsort(scores)[::-1][:top_k]
-    #
-    # results = []
-    # for idx in top_indices:
-    #     if scores[idx] > 0:
-    #         results.append({
-    #             "content": CORPUS[idx]["content"],
-    #             "score": float(scores[idx]),
-    #             "metadata": CORPUS[idx]["metadata"]
-    #         })
-    # return results
-    raise NotImplementedError("Implement lexical_search")
+    global _bm25_model, CORPUS
+    
+    if not CORPUS:
+        try:
+            from .task4_chunking_indexing import CHROMA_DIR, COLLECTION_NAME
+        except ImportError:
+            from pathlib import Path
+            CHROMA_DIR = Path(__file__).parent.parent / "chroma_db"
+            COLLECTION_NAME = "ecommerce_support_docs"
+            
+        try:
+            import chromadb
+            client = chromadb.PersistentClient(path=str(CHROMA_DIR))
+            collection = client.get_collection(name=COLLECTION_NAME)
+            data = collection.get(include=["documents", "metadatas"])
+            if data and data["documents"]:
+                for doc, meta in zip(data["documents"], data["metadatas"]):
+                    CORPUS.append({"content": doc, "metadata": meta})
+        except Exception as e:
+            print(f"Warning: Could not load corpus from ChromaDB: {e}")
+            pass
+            
+    if not _bm25_model and CORPUS:
+        _bm25_model = build_bm25_index(CORPUS)
+        
+    if not _bm25_model:
+        return []
+
+    tokenized_query = query.lower().split()
+    scores = _bm25_model.get_scores(tokenized_query)
+    
+    # Get top_k indices
+    import numpy as np
+    top_indices = np.argsort(scores)[::-1][:top_k]
+    
+    results = []
+    for idx in top_indices:
+        if scores[idx] > 0:
+            results.append({
+                "content": CORPUS[idx]["content"],
+                "score": float(scores[idx]),
+                "metadata": CORPUS[idx]["metadata"]
+            })
+    return results
 
 
 if __name__ == "__main__":

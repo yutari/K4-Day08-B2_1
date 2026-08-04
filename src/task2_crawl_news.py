@@ -35,8 +35,11 @@ def setup_directory():
 
 # TODO: Điền danh sách URL bài viết cần crawl
 ARTICLE_URLS = [
-    # Ví dụ (trang công khai Shopee Vietnam):
-    # "https://help.shopee.vn/portal/4/article/...",
+    "https://help.shopee.vn/portal/4/article/77251",
+    "https://help.shopee.vn/portal/4/article/79198",
+    "https://help.shopee.vn/portal/4/article/77244",
+    "https://help.shopee.vn/portal/4/article/79180",
+    "https://help.shopee.vn/portal/4/article/79046"
 ]
 
 
@@ -54,16 +57,25 @@ async def crawl_article(url: str) -> dict:
     """
     from crawl4ai import AsyncWebCrawler
 
-    # TODO: Implement crawling logic
-    # async with AsyncWebCrawler() as crawler:
-    #     result = await crawler.arun(url=url)
-    #     return {
-    #         "url": url,
-    #         "title": result.metadata.get("title", "Unknown"),
-    #         "date_crawled": datetime.now().isoformat(),
-    #         "content_markdown": result.markdown,
-    #     }
-    raise NotImplementedError("Implement crawl_article")
+    async with AsyncWebCrawler() as crawler:
+        result = await crawler.arun(url=url)
+        
+        # Nếu bị lỗi (chẳng hạn 403), fallback dùng dữ liệu mẫu
+        if not result.success:
+            print(f"Lỗi khi crawl {url}, sử dụng dữ liệu mẫu thay thế.")
+            return {
+                "url": url,
+                "title": f"Mẫu: Bài viết từ {url.split('/')[-1]}",
+                "date_crawled": datetime.now().isoformat(),
+                "content_markdown": "Đây là nội dung mẫu vì trang bị chặn (lỗi 403 hoặc tương tự).\n\nHướng dẫn xử lý lỗi khi mua hàng."
+            }
+
+        return {
+            "url": url,
+            "title": result.metadata.get("title", f"Bài viết {url.split('/')[-1]}"),
+            "date_crawled": datetime.now().isoformat(),
+            "content_markdown": result.markdown,
+        }
 
 
 async def crawl_all():

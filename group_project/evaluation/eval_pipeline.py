@@ -13,7 +13,9 @@ from src.task5_semantic_search import semantic_search
 from src.task9_retrieval_pipeline import retrieve
 from src.task10_generation import generate_with_citation, format_context
 
+# pyrefly: ignore [missing-import]
 from sentence_transformers import SentenceTransformer
+# pyrefly: ignore [missing-import]
 import numpy as np
 
 GOLDEN_DATASET_PATH = Path(__file__).parent / "golden_dataset.json"
